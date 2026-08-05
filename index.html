@@ -294,7 +294,10 @@ var STATE = {
   reportMode:'summary',   // summary | daily | individual
   reportDate:null,        // for daily report (defaults to today)
   reportAgentId:null,     // for individual report
-  reportPeriodType:'month', // day | month (for individual report)
+  reportPeriodType:'month', // day | month | range (for individual report)
+  reportWeekAnchor:null,   // any date within the target week
+  reportRangeStart:null,
+  reportRangeEnd:null,
   importPreview:null,  // {listType, rows:[{name,phone,accountNo}]}
   modal:null,           // {type:'action', contactId, actionType} | {type:'editUser', userId}
   callStarts:{},        // contactId -> Date.now() when the in-app call button was pressed (not persisted)
@@ -327,6 +330,52 @@ var REASONS = [
 // أسباب مؤقتة يُحتمل تغيّرها لاحقاً — مؤهلة لإعادة الاتصال بعد فترة
 var RECOVERABLE_REASONS = ['نسي كلمة السر', 'لا يملك رصيداً كافياً', 'مشكلة تقنية في التطبيق', 'الرقم لا يرد / مغلق'];
 var RETRY_AFTER_DAYS = 14;
+
+/* ---- French labels used in generated reports (Excel/PDF) — operational Arabic UI stays as-is ---- */
+var BANK_NAME_FR = 'البنك الموريتاني للاستثمار';
+var FR_TEAM_LABEL = { 'تفعيل':'Groupe contact client non valide', 'استخدام':'Groupe contact client inactif' };
+var FR_TEAM_LABEL_SHORT = { 'تفعيل':'Non valide', 'استخدام':'Inactif' };
+function frRoleLabel(u){
+  if(u.role==='admin') return 'Responsable de centre contact';
+  if(u.role==='assistant') return 'Assistante';
+  return 'Agent — ' + FR_TEAM_LABEL[u.team];
+}
+var REASONS_FR = {
+  'نسي كلمة السر':'Mot de passe oublié',
+  'لا يملك رصيداً كافياً':'Solde insuffisant',
+  'لم يفهم كيفية الاستخدام':"Ne comprend pas l'utilisation",
+  'الرقم لا يرد / مغلق':'Numéro injoignable / éteint',
+  'رفض / غير مهتم':'Refus / non intéressé',
+  'مشكلة تقنية في التطبيق':'Problème technique',
+  'رقم غير صحيح':'Numéro incorrect',
+  'أخرى':'Autre'
+};
+function frReason(r){ return r ? (REASONS_FR[r] || r) : ''; }
+var RL = {
+  summaryTitle: "Rapport résumé de l'équipe",
+  dailyTitle: 'Rapport journalier',
+  weeklyTitle: 'Rapport hebdomadaire',
+  rangeTitle: 'Rapport personnalisé',
+  individualTitle: 'Rapport individuel',
+  period: 'Période',
+  totalNonValide: 'Total — Groupe non valide',
+  totalInactif: 'Total — Groupe inactif',
+  totalGeneral: 'Total général',
+  detailByAgent: 'Détail par agent',
+  name: 'Nom', team: 'Équipe', achievement: 'Réalisations', callTime: "Temps d'appel",
+  commonReasons: "Motifs d'échec les plus fréquents",
+  contactDetails: 'Détails des contacts',
+  agentCol: 'Agent', phone: 'Téléphone', type: 'Type', time: 'Heure', duration: 'Durée',
+  status: 'Statut', reason: 'Motif', date: 'Date',
+  success: 'Réussi', failed: 'Échoué', pendingStatus: 'En attente',
+  manualExtra: 'Opérations manuelles supplémentaires (hors liste)', count: 'Nombre',
+  signatureCenterHead: 'Signature — Responsable de centre contact',
+  signatureDirector: 'Signature — Directeur SEDAD',
+  printSave: 'Imprimer / Enregistrer en PDF',
+  exportExcel: 'Exporter en Excel',
+  noData: 'Aucune donnée pour cette période',
+  manual: 'manuel', successCount:'Réussites', failedCount:'Échecs', totalHandled:'Total traité'
+};
 
 /* ============================== UTIL ============================== */
 function uid(){ return 'id_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
@@ -494,6 +543,62 @@ function retryEligibleContacts(listType){
     if(listType && c.listType!==listType) return false;
     return true;
   });
+}
+function contactsInRange(startDate, endDate, agentId){
+  return STATE.calllists.filter(function(c){
+    if(c.status==='pending') return false;
+    if(!c.actionDate) return false;
+    if(c.actionDate<startDate || c.actionDate>endDate) return false;
+    if(agentId && c.assignedTo!==agentId) return false;
+    return true;
+  });
+}
+function manualEntriesInRange(startDate, endDate, agentId){
+  return STATE.entries.filter(function(e){
+    if(e.date<startDate || e.date>endDate) return false;
+    if(agentId && e.userId!==agentId) return false;
+    return e.count>0;
+  });
+}
+function combinedRangeTotal(agentId, startDate, endDate){
+  var listCount=contactsInRange(startDate,endDate,agentId).filter(function(c){ return c.status==='success'; }).length;
+  var manual=manualEntriesInRange(startDate,endDate,agentId).reduce(function(s,e){ return s+e.count; },0);
+  return listCount+manual;
+}
+function teamRangeTotal(team, startDate, endDate){
+  return teamAgents(team).reduce(function(s,a){ return s+combinedRangeTotal(a.id,startDate,endDate); },0);
+}
+function callSecondsInRange(agentId, startDate, endDate){
+  return STATE.calllists.filter(function(c){ return c.assignedTo===agentId && c.actionDate && c.actionDate>=startDate && c.actionDate<=endDate && c.callDurationSeconds; })
+    .reduce(function(s,c){ return s+(c.callDurationSeconds||0); }, 0);
+}
+function reasonCountsInRange(startDate, endDate){
+  var map={};
+  STATE.calllists.forEach(function(c){
+    if(c.status!=='failed') return;
+    if(!c.actionDate || c.actionDate<startDate || c.actionDate>endDate) return;
+    map[c.reason]=(map[c.reason]||0)+1;
+  });
+  return map;
+}
+function mondayOf(dateStr){
+  var d=new Date(dateStr+'T00:00:00');
+  var day=d.getDay(); // 0=Sun..6=Sat
+  var diff = day===0 ? -6 : (1-day); // move back to Monday
+  d.setDate(d.getDate()+diff);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function addDaysStr(dateStr, n){
+  var d=new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function exportAoaToExcel(filename, sheetName, aoa){
+  if(typeof XLSX==='undefined'){ showToast('تعذر تحميل أداة Excel'); return; }
+  var wb=XLSX.utils.book_new();
+  var ws=XLSX.utils.aoa_to_sheet(aoa);
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0,31));
+  XLSX.writeFile(wb, filename);
 }
 function fmtTime(iso){
   var d=new Date(iso);
@@ -748,7 +853,7 @@ function renderTopbar(user){
   var bar=el('<div class="topbar"></div>');
   bar.appendChild(el(
     '<div class="brand"><div class="mark">س</div><div><div class="name">سجل السداد</div>'+
-    '<div class="sub">بنك الموريتانيا للاستثمار</div></div></div>'
+    '<div class="sub">البنك الموريتاني للاستثمار</div></div></div>'
   ));
   var right=el('<div class="row"></div>');
   right.appendChild(el('<div class="whoami">'+roleLabel(user)+' — <b>'+escapeHtml(user.name)+'</b></div>'));
@@ -1303,6 +1408,24 @@ function renderListsTab(){
   }
   wrap.appendChild(distCard);
 
+  // ---- delete whole batch ----
+  if(monthContacts.length>0){
+    var delBatchCard=el('<div class="card" style="margin-bottom:14px; border-color:var(--danger);"></div>');
+    delBatchCard.appendChild(el('<div class="section-title">حذف القائمة بالكامل</div>'));
+    delBatchCard.appendChild(el('<div class="faint" style="margin-bottom:10px;">يحذف جميع جهات الاتصال المستوردة لـ'+TEAM_LABEL[listType]+' هذا الشهر ('+monthContacts.length+') نهائياً — لا يمكن التراجع.</div>'));
+    var delBatchBtn=el('<button class="btn danger block">حذف القائمة بالكامل ('+monthContacts.length+')</button>');
+    delBatchBtn.onclick=async function(){
+      if(!confirm('حذف كل جهات اتصال '+TEAM_LABEL[listType]+' لهذا الشهر نهائياً؟ هذا لا يمكن التراجع عنه.')) return;
+      var idsToRemove = monthContacts.map(function(c){ return c.id; });
+      STATE.calllists = STATE.calllists.filter(function(c){ return idsToRemove.indexOf(c.id)===-1; });
+      await saveCalllists();
+      showToast('تم حذف القائمة ✓');
+      render();
+    };
+    delBatchCard.appendChild(delBatchBtn);
+    wrap.appendChild(delBatchCard);
+  }
+
   // ---- retry-eligible card ----
   var retryList=retryEligibleContacts(listType);
   if(retryList.length>0){
@@ -1345,11 +1468,15 @@ function renderListsTab(){
       '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">اضغط "تحقّق" بعد الاتصال بالزبون بنفسك للتأكد أن العامل تواصل معه فعلاً — للتدقيق العشوائي</div>'
     ));
     var btbl=document.createElement('table');
-    btbl.innerHTML='<thead><tr><th>الاسم</th><th>مسندة إلى</th><th>الحالة</th><th>المدة</th><th>تحقّق الإدارة</th></tr></thead>';
+    btbl.innerHTML='<thead><tr><th>الاسم</th><th>مسندة إلى</th><th>الحالة</th><th>المدة</th><th>تحقّق الإدارة</th><th></th></tr></thead>';
     var btbody=document.createElement('tbody');
     monthContacts.forEach(function(c){
       var tr=document.createElement('tr');
-      var tdName=document.createElement('td'); tdName.textContent=c.name||'—';
+      var tdName=document.createElement('td');
+      var nameInput=document.createElement('input');
+      nameInput.value=c.name||''; nameInput.style.fontSize='12.5px'; nameInput.style.padding='6px 8px'; nameInput.style.minWidth='110px';
+      nameInput.onchange=async function(){ c.name=nameInput.value.trim(); await saveCalllists(); showToast('تم التحديث'); };
+      tdName.appendChild(nameInput);
       var tdAssign=document.createElement('td');
       var sel=document.createElement('select');
       sel.style.fontSize='12px'; sel.style.padding='6px 8px';
@@ -1374,7 +1501,17 @@ function renderListsTab(){
         vBtn.onclick=async function(){ c.verified=!c.verified; await saveCalllists(); render(); };
         tdVerify.appendChild(vBtn);
       }
-      tr.appendChild(tdName); tr.appendChild(tdAssign); tr.appendChild(tdStatus); tr.appendChild(tdDur); tr.appendChild(tdVerify);
+      var tdDel=document.createElement('td');
+      var delRowBtn=el('<button class="btn danger" style="padding:5px 9px; font-size:11px;">حذف</button>');
+      delRowBtn.onclick=async function(){
+        if(!confirm('حذف '+(c.name||'هذه الجهة')+' نهائياً؟')) return;
+        STATE.calllists = STATE.calllists.filter(function(x){ return x.id!==c.id; });
+        await saveCalllists();
+        showToast('تم الحذف ✓');
+        render();
+      };
+      tdDel.appendChild(delRowBtn);
+      tr.appendChild(tdName); tr.appendChild(tdAssign); tr.appendChild(tdStatus); tr.appendChild(tdDur); tr.appendChild(tdVerify); tr.appendChild(tdDel);
       btbody.appendChild(tr);
     });
     btbl.appendChild(btbody);
@@ -1428,10 +1565,30 @@ function handleFileImport(file, listType){
   reader.readAsArrayBuffer(file);
 }
 
+function frMonthLabel(ym){
+  var names=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  var parts=ym.split('-');
+  return names[parseInt(parts[1])-1]+' '+parts[0];
+}
+function fmtDurationFr(totalSeconds){
+  totalSeconds=totalSeconds||0;
+  var h=Math.floor(totalSeconds/3600), m=Math.floor((totalSeconds%3600)/60), s=totalSeconds%60;
+  if(h>0) return h+'h '+m+'min '+s+'s';
+  if(m>0) return m+'min '+s+'s';
+  return s+'s';
+}
+function frStatus(status){ return status==='success'?RL.success : status==='failed'?RL.failed : RL.pendingStatus; }
+
 function renderReportsTab(){
   var wrap=el('<div></div>');
   var modeToggle=el('<div class="tabs"></div>');
-  var modes=[{k:'summary', l:'ملخص الفريق'},{k:'daily', l:'تقرير يومي'},{k:'individual', l:'تقرير فردي'}];
+  var modes=[
+    {k:'summary', l:'ملخص الفريق'},
+    {k:'daily', l:'تقرير يومي'},
+    {k:'weekly', l:'تقرير أسبوعي'},
+    {k:'range', l:'فترة مخصصة'},
+    {k:'individual', l:'تقرير فردي'}
+  ];
   modes.forEach(function(m){
     var b=el('<div class="tab '+(STATE.reportMode===m.k?'active':'')+'">'+m.l+'</div>');
     b.onclick=function(){ STATE.reportMode=m.k; render(); };
@@ -1440,6 +1597,8 @@ function renderReportsTab(){
   wrap.appendChild(modeToggle);
 
   if(STATE.reportMode==='daily') wrap.appendChild(renderDailyReport());
+  else if(STATE.reportMode==='weekly') wrap.appendChild(renderWeeklyReport());
+  else if(STATE.reportMode==='range') wrap.appendChild(renderCustomRangeReport());
   else if(STATE.reportMode==='individual') wrap.appendChild(renderIndividualReport());
   else wrap.appendChild(renderSummaryReport());
 
@@ -1452,16 +1611,26 @@ function renderSignatureBlock(){
   box.appendChild(el('<hr class="rule">'));
   var row=el('<div style="display:flex; gap:24px; margin-top:14px;"></div>');
   var c1=el(
-    '<div style="flex:1;"><div class="faint" style="font-size:11.5px; margin-bottom:38px;">توقيع رئيس السنتر'+
+    '<div style="flex:1;"><div class="faint" style="font-size:11.5px; margin-bottom:38px;">'+RL.signatureCenterHead+
     (admin?(' — '+escapeHtml(admin.name)):'')+'</div><div style="border-top:1px solid var(--border);"></div></div>'
   );
   var c2=el(
-    '<div style="flex:1;"><div class="faint" style="font-size:11.5px; margin-bottom:38px;">توقيع مدير السداد'+
+    '<div style="flex:1;"><div class="faint" style="font-size:11.5px; margin-bottom:38px;">'+RL.signatureDirector+
     (STATE.settings.directorName?(' — '+escapeHtml(STATE.settings.directorName)):'')+'</div><div style="border-top:1px solid var(--border);"></div></div>'
   );
   row.appendChild(c1); row.appendChild(c2);
   box.appendChild(row);
   return box;
+}
+
+function reportActionButtons(onPrint, onExcel){
+  var row=el('<div class="row" style="margin-top:16px;"></div>');
+  var printBtn=el('<button class="btn secondary" style="flex:1;">'+RL.printSave+'</button>');
+  printBtn.onclick=onPrint;
+  var excelBtn=el('<button class="btn" style="flex:1;">'+RL.exportExcel+'</button>');
+  excelBtn.onclick=onExcel;
+  row.appendChild(printBtn); row.appendChild(excelBtn);
+  return row;
 }
 
 function renderSummaryReport(){
@@ -1479,32 +1648,38 @@ function renderSummaryReport(){
 
   var month = STATE._reportMonth || currentMonthKey();
   var agents=agentsOnly();
+  var actTot=teamMonthTotal('تفعيل', month), useTot=teamMonthTotal('استخدام', month);
+  var counts=reasonCounts(month);
+  var reasonEntries=Object.keys(counts).map(function(k){ return {reason:k, count:counts[k]}; }).sort(function(a,b){ return b.count-a.count; });
 
   var printArea=el('<div class="report-print"></div>');
-  printArea.appendChild(el('<div class="section-title" style="font-size:15px;">تقرير ملخص الفريق — '+arabicMonthLabel(month)+'</div>'));
+  printArea.appendChild(el(
+    '<div class="faint" style="font-size:11.5px;">'+escapeHtml(BANK_NAME_FR)+'</div>'+
+    '<div class="section-title" style="font-size:15px;">'+RL.summaryTitle+' — '+frMonthLabel(month)+'</div>'
+  ));
 
   var summaryCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  var actTot=teamMonthTotal('تفعيل', month), useTot=teamMonthTotal('استخدام', month);
   summaryCard.appendChild(el(
     '<div class="stat-grid">'+
-      '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actTot)+'</div><div class="lbl">إجمالي التفعيل</div></div>'+
-      '<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useTot)+'</div><div class="lbl">إجمالي الاستخدام</div></div>'+
-      '<div class="stat-card"><div class="num">'+fmtNum(actTot+useTot)+'</div><div class="lbl">الإجمالي الكلي</div></div>'+
+      '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actTot)+'</div><div class="lbl">'+RL.totalNonValide+'</div></div>'+
+      '<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useTot)+'</div><div class="lbl">'+RL.totalInactif+'</div></div>'+
+      '<div class="stat-card"><div class="num">'+fmtNum(actTot+useTot)+'</div><div class="lbl">'+RL.totalGeneral+'</div></div>'+
     '</div>'
   ));
   printArea.appendChild(summaryCard);
 
   var tableCard=el('<div class="card"></div>');
-  tableCard.appendChild(el('<div class="section-title">تفصيل حسب العامل</div>'));
+  tableCard.appendChild(el('<div class="section-title">'+RL.detailByAgent+'</div>'));
+  var sortedAgents=agents.slice().sort(function(a,b){ return combinedMonthTotal(b.id,month)-combinedMonthTotal(a.id,month); });
   var tbl=document.createElement('table');
-  tbl.innerHTML='<thead><tr><th>الاسم</th><th>الفريق</th><th>الإنجاز</th><th>وقت المكالمات</th></tr></thead>';
+  tbl.innerHTML='<thead><tr><th>'+RL.name+'</th><th>'+RL.team+'</th><th>'+RL.achievement+'</th><th>'+RL.callTime+'</th></tr></thead>';
   var tbody=document.createElement('tbody');
-  agents.slice().sort(function(a,b){ return combinedMonthTotal(b.id,month)-combinedMonthTotal(a.id,month); }).forEach(function(a){
+  sortedAgents.forEach(function(a){
     var t=combinedMonthTotal(a.id, month);
     var secs=agentCallSecondsInMonth(a.id, month);
     var tr=document.createElement('tr');
-    tr.innerHTML='<td>'+escapeHtml(a.name)+'</td><td><span class="tag '+(a.team==='تفعيل'?'activation':'usage')+'">'+a.team+'</span></td>'+
-      '<td>'+fmtNum(t)+'</td><td>'+fmtDuration(secs)+'</td>';
+    tr.innerHTML='<td>'+escapeHtml(a.name)+'</td><td><span class="tag '+(a.team==='تفعيل'?'activation':'usage')+'">'+FR_TEAM_LABEL_SHORT[a.team]+'</span></td>'+
+      '<td>'+fmtNum(t)+'</td><td>'+fmtDurationFr(secs)+'</td>';
     tbody.appendChild(tr);
   });
   tbl.appendChild(tbody);
@@ -1512,17 +1687,15 @@ function renderSummaryReport(){
   printArea.appendChild(tableCard);
 
   var reasonsCard=el('<div class="card" style="margin-top:14px;"></div>');
-  reasonsCard.appendChild(el('<div class="section-title">الأسباب الأكثر شيوعاً لعدم النجاح</div>'));
-  var counts=reasonCounts(month);
-  var entries=Object.keys(counts).map(function(k){ return {reason:k, count:counts[k]}; }).sort(function(a,b){ return b.count-a.count; });
-  if(entries.length===0){
-    reasonsCard.appendChild(el('<div class="faint">لا توجد بيانات أسباب مسجّلة لهذا الشهر بعد</div>'));
+  reasonsCard.appendChild(el('<div class="section-title">'+RL.commonReasons+'</div>'));
+  if(reasonEntries.length===0){
+    reasonsCard.appendChild(el('<div class="faint">'+RL.noData+'</div>'));
   } else {
-    var maxCount=entries[0].count;
-    entries.forEach(function(e2){
+    var maxCount=reasonEntries[0].count;
+    reasonEntries.forEach(function(e2){
       var pct=Math.round((e2.count/maxCount)*100);
       var row=el('<div class="reason-bar-row"></div>');
-      row.appendChild(el('<div class="rlabel">'+escapeHtml(e2.reason)+'</div>'));
+      row.appendChild(el('<div class="rlabel">'+escapeHtml(frReason(e2.reason))+'</div>'));
       row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
       reasonsCard.appendChild(row);
@@ -1532,9 +1705,31 @@ function renderSummaryReport(){
   printArea.appendChild(renderSignatureBlock());
   container.appendChild(printArea);
 
-  var printBtn=el('<button class="btn secondary block" style="margin-top:16px;">طباعة / حفظ كـ PDF</button>');
-  printBtn.onclick=function(){ window.print(); };
-  container.appendChild(printBtn);
+  container.appendChild(reportActionButtons(
+    function(){ window.print(); },
+    function(){
+      var admin = STATE.users.find(function(u){ return u.role==='admin'; });
+      var aoa=[
+        [BANK_NAME_FR],
+        [RL.summaryTitle+' — '+frMonthLabel(month)],
+        [],
+        [RL.totalNonValide, actTot],
+        [RL.totalInactif, useTot],
+        [RL.totalGeneral, actTot+useTot],
+        [],
+        [RL.name, RL.team, RL.achievement, RL.callTime]
+      ];
+      sortedAgents.forEach(function(a){
+        aoa.push([a.name, FR_TEAM_LABEL_SHORT[a.team], combinedMonthTotal(a.id,month), fmtDurationFr(agentCallSecondsInMonth(a.id,month))]);
+      });
+      aoa.push([]); aoa.push([RL.reason, RL.count]);
+      reasonEntries.forEach(function(e2){ aoa.push([frReason(e2.reason), e2.count]); });
+      aoa.push([]);
+      aoa.push([RL.signatureCenterHead, admin?admin.name:'']);
+      aoa.push([RL.signatureDirector, STATE.settings.directorName||'']);
+      exportAoaToExcel('rapport-equipe-'+month+'.xlsx', RL.summaryTitle, aoa);
+    }
+  ));
 
   return container;
 }
@@ -1550,41 +1745,117 @@ function renderDailyReport(){
   container.appendChild(dateCard);
 
   var date = STATE.reportDate || todayStr();
-  var contacts = contactsOnDate(date, null);
-  var manualToday = STATE.entries.filter(function(e){ return e.date===date && e.count>0; });
+  container.appendChild(renderRangeReportBody(date, date, RL.dailyTitle+' — '+date, 'daily-'+date));
+  return container;
+}
 
-  var printArea=el('<div class="report-print"></div>');
-  printArea.appendChild(el('<div class="section-title" style="font-size:15px;">التقرير اليومي — '+escapeHtml(date)+'</div>'));
+function renderWeeklyReport(){
+  var container=el('<div></div>');
+  var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  pickCard.appendChild(el('<div class="section-title">اختر أي يوم من الأسبوع المطلوب</div>'));
+  var dateInput=document.createElement('input');
+  dateInput.type='date'; dateInput.value = STATE.reportWeekAnchor || todayStr();
+  dateInput.onchange=function(){ STATE.reportWeekAnchor=dateInput.value; render(); };
+  pickCard.appendChild(dateInput);
+  container.appendChild(pickCard);
 
+  var anchor = STATE.reportWeekAnchor || todayStr();
+  var start = mondayOf(anchor);
+  var end = addDaysStr(start, 6);
+  container.appendChild(el('<div class="faint" style="margin-bottom:10px;">'+start+' → '+end+'</div>'));
+  container.appendChild(renderRangeReportBody(start, end, RL.weeklyTitle+' — '+start+' → '+end, 'hebdo-'+start));
+  return container;
+}
+
+function renderCustomRangeReport(){
+  var container=el('<div></div>');
+  var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  pickCard.appendChild(el('<div class="section-title">اختر الفترة</div>'));
+  var startInput=document.createElement('input'); startInput.type='date';
+  startInput.value = STATE.reportRangeStart || todayStr();
+  startInput.onchange=function(){ STATE.reportRangeStart=startInput.value; render(); };
+  var endInput=document.createElement('input'); endInput.type='date';
+  endInput.value = STATE.reportRangeEnd || todayStr();
+  endInput.onchange=function(){ STATE.reportRangeEnd=endInput.value; render(); };
+  var f1=el('<div class="field"><label>من تاريخ</label></div>'); f1.appendChild(startInput);
+  var f2=el('<div class="field"><label>إلى تاريخ</label></div>'); f2.appendChild(endInput);
+  pickCard.appendChild(f1); pickCard.appendChild(f2);
+  container.appendChild(pickCard);
+
+  var start = STATE.reportRangeStart || todayStr();
+  var end = STATE.reportRangeEnd || todayStr();
+  if(start>end){ container.appendChild(el('<div class="error-msg">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</div>')); return container; }
+  container.appendChild(renderRangeReportBody(start, end, RL.rangeTitle+' — '+start+' → '+end, 'periode-'+start+'-'+end));
+  return container;
+}
+
+function renderRangeReportBody(startDate, endDate, titleText, fileSlug){
+  var container=el('<div></div>');
+  var contacts = contactsInRange(startDate, endDate, null);
+  var manualEntries = manualEntriesInRange(startDate, endDate, null);
   var successCount = contacts.filter(function(c){ return c.status==='success'; }).length;
   var failCount = contacts.filter(function(c){ return c.status==='failed'; }).length;
+  var actTot = teamRangeTotal('تفعيل', startDate, endDate), useTot = teamRangeTotal('استخدام', startDate, endDate);
+  var reasonMap = reasonCountsInRange(startDate, endDate);
+  var reasonEntries = Object.keys(reasonMap).map(function(k){ return {reason:k, count:reasonMap[k]}; }).sort(function(a,b){ return b.count-a.count; });
+
+  var printArea=el('<div class="report-print"></div>');
+  printArea.appendChild(el(
+    '<div class="faint" style="font-size:11.5px;">'+escapeHtml(BANK_NAME_FR)+'</div>'+
+    '<div class="section-title" style="font-size:15px;">'+titleText+'</div>'
+  ));
+
   var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   statCard.appendChild(el(
     '<div class="stat-grid">'+
-    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(successCount)+'</div><div class="lbl">نجاح</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failCount)+'</div><div class="lbl">فشل</div></div>'+
-    '<div class="stat-card"><div class="num">'+fmtNum(contacts.length)+'</div><div class="lbl">إجمالي المعالج</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actTot)+'</div><div class="lbl">'+RL.totalNonValide+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useTot)+'</div><div class="lbl">'+RL.totalInactif+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(successCount)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failCount)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
     '</div>'
   ));
   printArea.appendChild(statCard);
 
+  var agentsInvolved=[]; contacts.forEach(function(c){ if(c.assignedTo && agentsInvolved.indexOf(c.assignedTo)===-1) agentsInvolved.push(c.assignedTo); });
+  if(agentsInvolved.length>0){
+    var byAgentCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+    byAgentCard.appendChild(el('<div class="section-title">'+RL.detailByAgent+'</div>'));
+    var atbl=document.createElement('table');
+    atbl.innerHTML='<thead><tr><th>'+RL.name+'</th><th>'+RL.team+'</th><th>'+RL.totalHandled+'</th><th>'+RL.callTime+'</th></tr></thead>';
+    var atbody=document.createElement('tbody');
+    agentsInvolved.slice().sort(function(x,y){
+      var ax=getUser(x), ay=getUser(y);
+      return combinedRangeTotal(y,startDate,endDate)-combinedRangeTotal(x,startDate,endDate);
+    }).forEach(function(aid){
+      var a=getUser(aid); if(!a) return;
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+escapeHtml(a.name)+'</td><td><span class="tag '+(a.team==='تفعيل'?'activation':'usage')+'">'+FR_TEAM_LABEL_SHORT[a.team]+'</span></td>'+
+        '<td>'+fmtNum(combinedRangeTotal(aid,startDate,endDate))+'</td><td>'+fmtDurationFr(callSecondsInRange(aid,startDate,endDate))+'</td>';
+      atbody.appendChild(tr);
+    });
+    atbl.appendChild(atbody);
+    byAgentCard.appendChild(atbl);
+    printArea.appendChild(byAgentCard);
+  }
+
   var tableCard=el('<div class="card"></div>');
-  tableCard.appendChild(el('<div class="section-title">تفاصيل جهات الاتصال</div>'));
+  tableCard.appendChild(el('<div class="section-title">'+RL.contactDetails+'</div>'));
   if(contacts.length===0){
-    tableCard.appendChild(el('<div class="faint">لا توجد بيانات لهذا اليوم</div>'));
+    tableCard.appendChild(el('<div class="faint">'+RL.noData+'</div>'));
   } else {
     var tbl=document.createElement('table');
-    tbl.innerHTML='<thead><tr><th>العامل</th><th>الاسم</th><th>الهاتف</th><th>النوع</th><th>الوقت</th><th>المدة</th><th>الحالة</th><th>السبب</th></tr></thead>';
+    tbl.innerHTML='<thead><tr><th>'+RL.agentCol+'</th><th>'+RL.name+'</th><th>'+RL.phone+'</th><th>'+RL.type+'</th><th>'+RL.date+'</th><th>'+RL.time+'</th><th>'+RL.duration+'</th><th>'+RL.status+'</th><th>'+RL.reason+'</th></tr></thead>';
     var tbody=document.createElement('tbody');
     contacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
       var agent=getUser(c.assignedTo);
       var tr=document.createElement('tr');
       tr.innerHTML='<td>'+(agent?escapeHtml(agent.name):'—')+'</td><td>'+escapeHtml(c.name||'—')+'</td>'+
         '<td style="direction:ltr; text-align:right;">'+escapeHtml(c.phone||'—')+'</td>'+
-        '<td>'+(c.listType||'')+'</td><td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
-        '<td>'+fmtDuration(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠</span>':'')+'</td>'+
-        '<td>'+(c.status==='success'?'نجاح':'فشل')+'</td>'+
-        '<td>'+(c.status==='failed'?escapeHtml(c.reason||''):'—')+'</td>';
+        '<td>'+FR_TEAM_LABEL_SHORT[c.listType]+'</td><td>'+(c.actionDate||'')+'</td>'+
+        '<td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
+        '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠ '+RL.manual+'</span>':'')+'</td>'+
+        '<td>'+frStatus(c.status)+'</td>'+
+        '<td>'+(c.status==='failed'?escapeHtml(frReason(c.reason)):'—')+'</td>';
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -1594,39 +1865,31 @@ function renderDailyReport(){
   }
   printArea.appendChild(tableCard);
 
-  // ---- per-agent call time + suspicious-gap flags ----
-  var activeAgentIds=[]; contacts.forEach(function(c){ if(c.assignedTo && activeAgentIds.indexOf(c.assignedTo)===-1) activeAgentIds.push(c.assignedTo); });
-  if(activeAgentIds.length>0){
-    var timeCard=el('<div class="card" style="margin-top:14px;"></div>');
-    timeCard.appendChild(el('<div class="section-title">إجمالي وقت المكالمات لكل عامل — '+escapeHtml(date)+'</div>'));
-    var ttbl=document.createElement('table');
-    ttbl.innerHTML='<thead><tr><th>العامل</th><th>عدد العمليات</th><th>إجمالي وقت المكالمات</th><th>ملاحظة</th></tr></thead>';
-    var ttbody=document.createElement('tbody');
-    activeAgentIds.forEach(function(aid){
-      var agent=getUser(aid);
-      var cnt=contacts.filter(function(c){ return c.assignedTo===aid; }).length;
-      var secs=agentCallSecondsOnDate(aid, date);
-      var gaps=suspiciousGapCount(aid, date);
-      var tr=document.createElement('tr');
-      tr.innerHTML='<td>'+(agent?escapeHtml(agent.name):'—')+'</td><td>'+fmtNum(cnt)+'</td><td>'+fmtDuration(secs)+'</td>'+
-        '<td>'+(gaps>0?('<span style="color:#B5514B;">⚠ '+gaps+' فاصل زمني مريب</span>'):'—')+'</td>';
-      ttbody.appendChild(tr);
+  if(reasonEntries.length>0){
+    var reasonsCard=el('<div class="card" style="margin-top:14px;"></div>');
+    reasonsCard.appendChild(el('<div class="section-title">'+RL.commonReasons+'</div>'));
+    var maxR=reasonEntries[0].count;
+    reasonEntries.forEach(function(e2){
+      var pct=Math.round((e2.count/maxR)*100);
+      var row=el('<div class="reason-bar-row"></div>');
+      row.appendChild(el('<div class="rlabel">'+escapeHtml(frReason(e2.reason))+'</div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
+      row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
+      reasonsCard.appendChild(row);
     });
-    ttbl.appendChild(ttbody);
-    timeCard.appendChild(ttbl);
-    printArea.appendChild(timeCard);
+    printArea.appendChild(reasonsCard);
   }
 
-  if(manualToday.length>0){
+  if(manualEntries.length>0){
     var manualCard=el('<div class="card" style="margin-top:14px;"></div>');
-    manualCard.appendChild(el('<div class="section-title">عمليات يدوية إضافية (خارج القائمة)</div>'));
+    manualCard.appendChild(el('<div class="section-title">'+RL.manualExtra+'</div>'));
     var mtbl=document.createElement('table');
-    mtbl.innerHTML='<thead><tr><th>العامل</th><th>العدد</th></tr></thead>';
+    mtbl.innerHTML='<thead><tr><th>'+RL.agentCol+'</th><th>'+RL.date+'</th><th>'+RL.count+'</th></tr></thead>';
     var mtbody=document.createElement('tbody');
-    manualToday.forEach(function(e){
+    manualEntries.forEach(function(e){
       var agent=getUser(e.userId);
       var tr=document.createElement('tr');
-      tr.innerHTML='<td>'+(agent?escapeHtml(agent.name):'—')+'</td><td>'+fmtNum(e.count)+'</td>';
+      tr.innerHTML='<td>'+(agent?escapeHtml(agent.name):'—')+'</td><td>'+e.date+'</td><td>'+fmtNum(e.count)+'</td>';
       mtbody.appendChild(tr);
     });
     mtbl.appendChild(mtbody);
@@ -1637,9 +1900,31 @@ function renderDailyReport(){
   printArea.appendChild(renderSignatureBlock());
   container.appendChild(printArea);
 
-  var printBtn=el('<button class="btn secondary block" style="margin-top:16px;">طباعة / حفظ كـ PDF</button>');
-  printBtn.onclick=function(){ window.print(); };
-  container.appendChild(printBtn);
+  container.appendChild(reportActionButtons(
+    function(){ window.print(); },
+    function(){
+      var admin = STATE.users.find(function(u){ return u.role==='admin'; });
+      var aoa=[[BANK_NAME_FR],[titleText],[],
+        [RL.totalNonValide, actTot],[RL.totalInactif, useTot],
+        [RL.successCount, successCount],[RL.failedCount, failCount],
+        [],[RL.agentCol, RL.name, RL.phone, RL.type, RL.date, RL.time, RL.duration, RL.status, RL.reason]
+      ];
+      contacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
+        var agent=getUser(c.assignedTo);
+        aoa.push([
+          agent?agent.name:'', c.name||'', c.phone||'', FR_TEAM_LABEL_SHORT[c.listType]||'',
+          c.actionDate||'', c.actionAt?fmtTime(c.actionAt):'', fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ('+RL.manual+')':''),
+          frStatus(c.status), c.status==='failed'?frReason(c.reason):''
+        ]);
+      });
+      if(manualEntries.length>0){
+        aoa.push([]); aoa.push([RL.manualExtra]); aoa.push([RL.agentCol, RL.date, RL.count]);
+        manualEntries.forEach(function(e){ var agent=getUser(e.userId); aoa.push([agent?agent.name:'', e.date, e.count]); });
+      }
+      aoa.push([]); aoa.push([RL.signatureCenterHead, admin?admin.name:'']); aoa.push([RL.signatureDirector, STATE.settings.directorName||'']);
+      exportAoaToExcel(fileSlug+'.xlsx', titleText.slice(0,28), aoa);
+    }
+  ));
 
   return container;
 }
@@ -1660,20 +1945,28 @@ function renderIndividualReport(){
   var f1=el('<div class="field"></div>'); f1.appendChild(agentSel); pickCard.appendChild(f1);
 
   var periodSel=document.createElement('select');
-  periodSel.innerHTML='<option value="month">تقرير شهري</option><option value="day">تقرير يومي</option>';
+  periodSel.innerHTML='<option value="month">تقرير شهري</option><option value="day">تقرير يومي</option><option value="range">فترة مخصصة</option>';
   periodSel.value=STATE.reportPeriodType;
   periodSel.onchange=function(){ STATE.reportPeriodType=periodSel.value; render(); };
   var f2=el('<div class="field"></div>'); f2.appendChild(periodSel); pickCard.appendChild(f2);
 
-  var periodValueInput=document.createElement('input');
   if(STATE.reportPeriodType==='day'){
-    periodValueInput.type='date'; periodValueInput.value=STATE.reportDate||todayStr();
-    periodValueInput.onchange=function(){ STATE.reportDate=periodValueInput.value; render(); };
+    var dIn=document.createElement('input'); dIn.type='date'; dIn.value=STATE.reportDate||todayStr();
+    dIn.onchange=function(){ STATE.reportDate=dIn.value; render(); };
+    pickCard.appendChild(dIn);
+  } else if(STATE.reportPeriodType==='range'){
+    var sIn=document.createElement('input'); sIn.type='date'; sIn.value=STATE.reportRangeStart||todayStr();
+    sIn.onchange=function(){ STATE.reportRangeStart=sIn.value; render(); };
+    var eIn=document.createElement('input'); eIn.type='date'; eIn.value=STATE.reportRangeEnd||todayStr();
+    eIn.onchange=function(){ STATE.reportRangeEnd=eIn.value; render(); };
+    var rf1=el('<div class="field"><label>من تاريخ</label></div>'); rf1.appendChild(sIn);
+    var rf2=el('<div class="field"><label>إلى تاريخ</label></div>'); rf2.appendChild(eIn);
+    pickCard.appendChild(rf1); pickCard.appendChild(rf2);
   } else {
-    periodValueInput.type='month'; periodValueInput.value=STATE._reportMonth||currentMonthKey();
-    periodValueInput.onchange=function(){ STATE._reportMonth=periodValueInput.value; render(); };
+    var mIn=document.createElement('input'); mIn.type='month'; mIn.value=STATE._reportMonth||currentMonthKey();
+    mIn.onchange=function(){ STATE._reportMonth=mIn.value; render(); };
+    pickCard.appendChild(mIn);
   }
-  pickCard.appendChild(periodValueInput);
   container.appendChild(pickCard);
 
   if(!STATE.reportAgentId){
@@ -1683,70 +1976,67 @@ function renderIndividualReport(){
   var agent=getUser(STATE.reportAgentId);
   if(!agent){ container.appendChild(el('<div class="faint">هذا العامل لم يعد موجوداً</div>')); return container; }
 
-  var contacts, periodLabel, manualEntries;
+  var contacts, periodLabelFr, manualEntries, startDate, endDate;
   if(STATE.reportPeriodType==='day'){
     var date=STATE.reportDate||todayStr();
+    startDate=date; endDate=date;
     contacts=contactsOnDate(date, agent.id);
-    periodLabel=date;
+    periodLabelFr=date;
     manualEntries=STATE.entries.filter(function(e){ return e.userId===agent.id && e.date===date && e.count>0; });
+  } else if(STATE.reportPeriodType==='range'){
+    startDate=STATE.reportRangeStart||todayStr(); endDate=STATE.reportRangeEnd||todayStr();
+    if(startDate>endDate){ container.appendChild(el('<div class="error-msg">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</div>')); return container; }
+    contacts=contactsInRange(startDate, endDate, agent.id);
+    periodLabelFr=startDate+' → '+endDate;
+    manualEntries=manualEntriesInRange(startDate, endDate, agent.id);
   } else {
     var month=STATE._reportMonth||currentMonthKey();
+    startDate=month+'-01'; endDate=month+'-31';
     contacts=contactsForAgentMonth(agent.id, month);
-    periodLabel=arabicMonthLabel(month);
+    periodLabelFr=frMonthLabel(month);
     manualEntries=STATE.entries.filter(function(e){ return e.userId===agent.id && monthKey(e.date)===month && e.count>0; });
   }
 
   var printArea=el('<div class="report-print"></div>');
   printArea.appendChild(el(
-    '<div class="section-title" style="font-size:15px;">تقرير فردي — '+escapeHtml(agent.name)+'</div>'+
-    '<div class="faint" style="margin-bottom:12px;">'+TEAM_LABEL[agent.team]+' — '+escapeHtml(periodLabel)+'</div>'
+    '<div class="faint" style="font-size:11.5px;">'+escapeHtml(BANK_NAME_FR)+'</div>'+
+    '<div class="section-title" style="font-size:15px;">'+RL.individualTitle+' — '+escapeHtml(agent.name)+'</div>'+
+    '<div class="faint" style="margin-bottom:12px;">'+frRoleLabel(agent)+' — '+escapeHtml(periodLabelFr)+'</div>'
   ));
 
   var successCount=contacts.filter(function(c){ return c.status==='success'; }).length;
   var failCount=contacts.filter(function(c){ return c.status==='failed'; }).length;
   var manualTotal=manualEntries.reduce(function(s,e){ return s+e.count; }, 0);
-  var callSeconds = STATE.reportPeriodType==='day'
-    ? agentCallSecondsOnDate(agent.id, STATE.reportDate||todayStr())
-    : agentCallSecondsInMonth(agent.id, STATE._reportMonth||currentMonthKey());
+  var callSecs = STATE.reportPeriodType==='day' ? agentCallSecondsOnDate(agent.id, startDate)
+    : STATE.reportPeriodType==='range' ? callSecondsInRange(agent.id, startDate, endDate)
+    : agentCallSecondsInMonth(agent.id, startDate.slice(0,7));
   var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   statCard.appendChild(el(
     '<div class="stat-grid">'+
-    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(successCount)+'</div><div class="lbl">نجاح</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failCount)+'</div><div class="lbl">فشل</div></div>'+
-    '<div class="stat-card"><div class="num">'+fmtNum(manualTotal)+'</div><div class="lbl">يدوي إضافي</div></div>'+
-    '<div class="stat-card"><div class="num">'+fmtNum(successCount+manualTotal)+'</div><div class="lbl">الإجمالي المحتسب</div></div>'+
-    '<div class="stat-card"><div class="num" style="font-size:20px;">'+fmtDuration(callSeconds)+'</div><div class="lbl">إجمالي وقت المكالمات</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(successCount)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failCount)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
+    '<div class="stat-card"><div class="num">'+fmtNum(manualTotal)+'</div><div class="lbl">'+RL.manualExtra+'</div></div>'+
+    '<div class="stat-card"><div class="num">'+fmtDurationFr(callSecs)+'</div><div class="lbl">'+RL.callTime+'</div></div>'+
     '</div>'
   ));
   printArea.appendChild(statCard);
 
-  if(STATE.reportPeriodType==='day'){
-    var gapCount=suspiciousGapCount(agent.id, STATE.reportDate||todayStr());
-    if(gapCount>0){
-      printArea.appendChild(el(
-        '<div class="card" style="margin-bottom:14px; border-color:var(--danger); background:var(--danger-soft);">'+
-        '<div style="color:#f0b3ae; font-size:13px;">⚠ يوجد '+gapCount+' حالة بفاصل زمني أقل من '+SUSPICIOUS_GAP_SECONDS+' ثانية بين عمليتين متتاليتين — يستحق المراجعة</div>'+
-        '</div>'
-      ));
-    }
-  }
-
   var tableCard=el('<div class="card"></div>');
-  tableCard.appendChild(el('<div class="section-title">تفاصيل جهات الاتصال</div>'));
+  tableCard.appendChild(el('<div class="section-title">'+RL.contactDetails+'</div>'));
   if(contacts.length===0){
-    tableCard.appendChild(el('<div class="faint">لا توجد بيانات لهذه الفترة</div>'));
+    tableCard.appendChild(el('<div class="faint">'+RL.noData+'</div>'));
   } else {
     var tbl=document.createElement('table');
-    tbl.innerHTML='<thead><tr><th>الاسم</th><th>الهاتف</th><th>النوع</th><th>التاريخ</th><th>الوقت</th><th>المدة</th><th>الحالة</th><th>السبب</th></tr></thead>';
+    tbl.innerHTML='<thead><tr><th>'+RL.name+'</th><th>'+RL.phone+'</th><th>'+RL.type+'</th><th>'+RL.date+'</th><th>'+RL.time+'</th><th>'+RL.duration+'</th><th>'+RL.status+'</th><th>'+RL.reason+'</th></tr></thead>';
     var tbody=document.createElement('tbody');
     contacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
       var tr=document.createElement('tr');
       tr.innerHTML='<td>'+escapeHtml(c.name||'—')+'</td><td style="direction:ltr; text-align:right;">'+escapeHtml(c.phone||'—')+'</td>'+
-        '<td>'+(c.listType||'')+'</td><td>'+(c.actionDate||'')+'</td>'+
+        '<td>'+FR_TEAM_LABEL_SHORT[c.listType]+'</td><td>'+(c.actionDate||'')+'</td>'+
         '<td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
-        '<td>'+fmtDuration(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠</span>':'')+'</td>'+
-        '<td>'+(c.status==='success'?'نجاح':'فشل')+'</td>'+
-        '<td>'+(c.status==='failed'?escapeHtml(c.reason||''):'—')+'</td>';
+        '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠</span>':'')+'</td>'+
+        '<td>'+frStatus(c.status)+'</td>'+
+        '<td>'+(c.status==='failed'?escapeHtml(frReason(c.reason)):'—')+'</td>';
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -1758,7 +2048,7 @@ function renderIndividualReport(){
 
   if(failCount>0){
     var reasonsCard=el('<div class="card" style="margin-top:14px;"></div>');
-    reasonsCard.appendChild(el('<div class="section-title">أسباب عدم النجاح</div>'));
+    reasonsCard.appendChild(el('<div class="section-title">'+RL.commonReasons+'</div>'));
     var rmap={};
     contacts.forEach(function(c){ if(c.status==='failed'){ rmap[c.reason]=(rmap[c.reason]||0)+1; } });
     var rentries=Object.keys(rmap).map(function(k){ return {reason:k, count:rmap[k]}; }).sort(function(a,b){ return b.count-a.count; });
@@ -1766,7 +2056,7 @@ function renderIndividualReport(){
     rentries.forEach(function(e2){
       var pct=Math.round((e2.count/maxR)*100);
       var row=el('<div class="reason-bar-row"></div>');
-      row.appendChild(el('<div class="rlabel">'+escapeHtml(e2.reason)+'</div>'));
+      row.appendChild(el('<div class="rlabel">'+escapeHtml(frReason(e2.reason))+'</div>'));
       row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
       reasonsCard.appendChild(row);
@@ -1777,9 +2067,22 @@ function renderIndividualReport(){
   printArea.appendChild(renderSignatureBlock());
   container.appendChild(printArea);
 
-  var printBtn=el('<button class="btn secondary block" style="margin-top:16px;">طباعة / حفظ كـ PDF</button>');
-  printBtn.onclick=function(){ window.print(); };
-  container.appendChild(printBtn);
+  container.appendChild(reportActionButtons(
+    function(){ window.print(); },
+    function(){
+      var admin = STATE.users.find(function(u){ return u.role==='admin'; });
+      var aoa=[[BANK_NAME_FR],[RL.individualTitle+' — '+agent.name+' ('+frRoleLabel(agent)+')'],[periodLabelFr],[],
+        [RL.successCount, successCount],[RL.failedCount, failCount],[RL.manualExtra, manualTotal],[RL.callTime, fmtDurationFr(callSecs)],
+        [],[RL.name, RL.phone, RL.type, RL.date, RL.time, RL.duration, RL.status, RL.reason]
+      ];
+      contacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
+        aoa.push([c.name||'', c.phone||'', FR_TEAM_LABEL_SHORT[c.listType]||'', c.actionDate||'', c.actionAt?fmtTime(c.actionAt):'',
+          fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ('+RL.manual+')':''), frStatus(c.status), c.status==='failed'?frReason(c.reason):'']);
+      });
+      aoa.push([]); aoa.push([RL.signatureCenterHead, admin?admin.name:'']); aoa.push([RL.signatureDirector, STATE.settings.directorName||'']);
+      exportAoaToExcel('rapport-individuel-'+agent.name.replace(/\s+/g,'-')+'.xlsx', RL.individualTitle, aoa);
+    }
+  ));
 
   return container;
 }
