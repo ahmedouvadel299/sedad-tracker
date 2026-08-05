@@ -259,6 +259,17 @@
   .list-type-toggle .opt.active.activation{ background:var(--activation-soft); border-color:var(--activation); color:var(--activation); font-weight:600; }
   .list-type-toggle .opt.active.usage{ background:var(--usage-soft); border-color:var(--usage); color:var(--usage); font-weight:600; }
   .preview-table-wrap{ max-height:260px; overflow:auto; border:1px solid var(--border); border-radius:10px; margin:12px 0; }
+
+  @media print{
+    body{ background:#fff; }
+    body *{ visibility:hidden; }
+    .report-print, .report-print *{ visibility:visible !important; color:#111 !important; }
+    .report-print{ position:absolute; left:0; top:0; width:100%; }
+    .card{ background:#fff; border:1px solid #ccc; break-inside:avoid; }
+    .stat-card{ background:#f5f5f5; border:1px solid #ddd; }
+    table, th, td{ border-color:#ccc !important; }
+    .bar-fill{ background:#999 !important; }
+  }
 </style>
 </head>
 <body>
@@ -280,6 +291,10 @@ var STATE = {
   adminTab:'overview',
   agentTab:'today',
   adminListType:'تفعيل',
+  reportMode:'summary',   // summary | daily | individual
+  reportDate:null,        // for daily report (defaults to today)
+  reportAgentId:null,     // for individual report
+  reportPeriodType:'month', // day | month (for individual report)
   importPreview:null,  // {listType, rows:[{name,phone,accountNo}]}
   modal:null,           // {type:'reason', contactId}
   pinBuffer:'',
@@ -289,11 +304,11 @@ var STATE = {
 };
 
 var DEFAULT_SETTINGS = {
-  commissionPerSuccess:10,
   dailyTargetActivation:125,
   dailyTargetUsage:125,
   monthlyTargetTeamActivation:2500,
-  monthlyTargetTeamUsage:2500
+  monthlyTargetTeamUsage:2500,
+  directorName:''
 };
 
 var TEAM_LABEL = { 'تفعيل':'فريق التفعيل', 'استخدام':'فريق التحفيز على الاستخدام' };
@@ -448,6 +463,19 @@ function reasonCounts(month, listType){
     map[c.reason] = (map[c.reason]||0) + 1;
   });
   return map;
+}
+function contactsOnDate(date, agentId){
+  return STATE.calllists.filter(function(c){
+    if(c.status==='pending') return false;
+    if(c.actionDate!==date) return false;
+    if(agentId && c.assignedTo!==agentId) return false;
+    return true;
+  });
+}
+function contactsForAgentMonth(agentId, month){
+  return STATE.calllists.filter(function(c){
+    return c.assignedTo===agentId && c.status!=='pending' && c.actionDate && monthKey(c.actionDate)===month;
+  });
 }
 function dailyTargetFor(user){
   if(user.dailyTarget) return user.dailyTarget;
@@ -767,10 +795,10 @@ function renderAgentView(user){
 
   // monthly stat row
   var mTotal=combinedMonthTotal(user.id);
+  var mSuccess=listSuccessesMonthForUser(user.id, currentMonthKey());
   var statGrid=el('<div class="stat-grid" style="margin-top:16px;"></div>');
   statGrid.appendChild(el('<div class="stat-card"><div class="num">'+fmtNum(mTotal)+'</div><div class="lbl">إجمالي هذا الشهر</div></div>'));
-  var commission = mTotal * STATE.settings.commissionPerSuccess;
-  statGrid.appendChild(el('<div class="stat-card"><div class="num">'+fmtNum(commission)+'</div><div class="lbl">عمولة تقديرية (أوقية)</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num">'+fmtNum(mSuccess)+'</div><div class="lbl">نجاح من القائمة هذا الشهر</div></div>'));
   wrap.appendChild(statGrid);
 
   // history
@@ -1181,12 +1209,44 @@ function handleFileImport(file, listType){
 
 function renderReportsTab(){
   var wrap=el('<div></div>');
-  var months=[];
-  var d=new Date();
-  for(var i=0;i<6;i++){
-    var m=new Date(d.getFullYear(), d.getMonth()-i, 1);
-    months.push(m.getFullYear()+'-'+String(m.getMonth()+1).padStart(2,'0'));
-  }
+  var modeToggle=el('<div class="tabs"></div>');
+  var modes=[{k:'summary', l:'ملخص الفريق'},{k:'daily', l:'تقرير يومي'},{k:'individual', l:'تقرير فردي'}];
+  modes.forEach(function(m){
+    var b=el('<div class="tab '+(STATE.reportMode===m.k?'active':'')+'">'+m.l+'</div>');
+    b.onclick=function(){ STATE.reportMode=m.k; render(); };
+    modeToggle.appendChild(b);
+  });
+  wrap.appendChild(modeToggle);
+
+  if(STATE.reportMode==='daily') wrap.appendChild(renderDailyReport());
+  else if(STATE.reportMode==='individual') wrap.appendChild(renderIndividualReport());
+  else wrap.appendChild(renderSummaryReport());
+
+  return wrap;
+}
+
+function renderSignatureBlock(){
+  var admin = STATE.users.find(function(u){ return u.role==='admin'; });
+  var box=el('<div style="margin-top:26px;"></div>');
+  box.appendChild(el('<hr class="rule">'));
+  var row=el('<div style="display:flex; gap:24px; margin-top:14px;"></div>');
+  var c1=el(
+    '<div style="flex:1;"><div class="faint" style="font-size:11.5px; margin-bottom:38px;">توقيع رئيس السنتر'+
+    (admin?(' — '+escapeHtml(admin.name)):'')+'</div><div style="border-top:1px solid var(--border);"></div></div>'
+  );
+  var c2=el(
+    '<div style="flex:1;"><div class="faint" style="font-size:11.5px; margin-bottom:38px;">توقيع مدير السداد'+
+    (STATE.settings.directorName?(' — '+escapeHtml(STATE.settings.directorName)):'')+'</div><div style="border-top:1px solid var(--border);"></div></div>'
+  );
+  row.appendChild(c1); row.appendChild(c2);
+  box.appendChild(row);
+  return box;
+}
+
+function renderSummaryReport(){
+  var container=el('<div></div>');
+  var months=[]; var d=new Date();
+  for(var i=0;i<6;i++){ var m=new Date(d.getFullYear(), d.getMonth()-i,1); months.push(m.getFullYear()+'-'+String(m.getMonth()+1).padStart(2,'0')); }
   var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   pickCard.appendChild(el('<div class="section-title">اختر الشهر</div>'));
   var sel=document.createElement('select');
@@ -1194,49 +1254,43 @@ function renderReportsTab(){
   sel.value = STATE._reportMonth || currentMonthKey();
   sel.onchange=function(){ STATE._reportMonth=sel.value; render(); };
   pickCard.appendChild(sel);
-  wrap.appendChild(pickCard);
+  container.appendChild(pickCard);
 
   var month = STATE._reportMonth || currentMonthKey();
   var agents=agentsOnly();
 
+  var printArea=el('<div class="report-print"></div>');
+  printArea.appendChild(el('<div class="section-title" style="font-size:15px;">تقرير ملخص الفريق — '+arabicMonthLabel(month)+'</div>'));
+
   var summaryCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   var actTot=teamMonthTotal('تفعيل', month), useTot=teamMonthTotal('استخدام', month);
-  var totalCommission = (actTot+useTot) * STATE.settings.commissionPerSuccess;
   summaryCard.appendChild(el(
-    '<div class="section-title">ملخص '+arabicMonthLabel(month)+'</div>'+
     '<div class="stat-grid">'+
       '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actTot)+'</div><div class="lbl">إجمالي التفعيل</div></div>'+
       '<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useTot)+'</div><div class="lbl">إجمالي الاستخدام</div></div>'+
       '<div class="stat-card"><div class="num">'+fmtNum(actTot+useTot)+'</div><div class="lbl">الإجمالي الكلي</div></div>'+
-      '<div class="stat-card"><div class="num">'+fmtNum(totalCommission)+'</div><div class="lbl">إجمالي العمولات (أوقية)</div></div>'+
     '</div>'
   ));
-  wrap.appendChild(summaryCard);
+  printArea.appendChild(summaryCard);
 
   var tableCard=el('<div class="card"></div>');
   tableCard.appendChild(el('<div class="section-title">تفصيل حسب العامل</div>'));
   var tbl=document.createElement('table');
-  tbl.innerHTML='<thead><tr><th>الاسم</th><th>الفريق</th><th>الإنجاز</th><th>العمولة (أوقية)</th></tr></thead>';
+  tbl.innerHTML='<thead><tr><th>الاسم</th><th>الفريق</th><th>الإنجاز</th></tr></thead>';
   var tbody=document.createElement('tbody');
   agents.slice().sort(function(a,b){ return combinedMonthTotal(b.id,month)-combinedMonthTotal(a.id,month); }).forEach(function(a){
     var t=combinedMonthTotal(a.id, month);
     var tr=document.createElement('tr');
     tr.innerHTML='<td>'+escapeHtml(a.name)+'</td><td><span class="tag '+(a.team==='تفعيل'?'activation':'usage')+'">'+a.team+'</span></td>'+
-      '<td>'+fmtNum(t)+'</td><td>'+fmtNum(t*STATE.settings.commissionPerSuccess)+'</td>';
+      '<td>'+fmtNum(t)+'</td>';
     tbody.appendChild(tr);
   });
   tbl.appendChild(tbody);
   tableCard.appendChild(tbl);
+  printArea.appendChild(tableCard);
 
-  var printBtn=el('<button class="btn secondary block" style="margin-top:16px;">طباعة / حفظ كـ PDF</button>');
-  printBtn.onclick=function(){ window.print(); };
-  tableCard.appendChild(printBtn);
-
-  wrap.appendChild(tableCard);
-
-  // ---- reasons breakdown ----
   var reasonsCard=el('<div class="card" style="margin-top:14px;"></div>');
-  reasonsCard.appendChild(el('<div class="section-title">الأسباب الأكثر شيوعاً لعدم النجاح — '+arabicMonthLabel(month)+'</div>'));
+  reasonsCard.appendChild(el('<div class="section-title">الأسباب الأكثر شيوعاً لعدم النجاح</div>'));
   var counts=reasonCounts(month);
   var entries=Object.keys(counts).map(function(k){ return {reason:k, count:counts[k]}; }).sort(function(a,b){ return b.count-a.count; });
   if(entries.length===0){
@@ -1252,10 +1306,222 @@ function renderReportsTab(){
       reasonsCard.appendChild(row);
     });
   }
-  wrap.appendChild(reasonsCard);
+  printArea.appendChild(reasonsCard);
+  printArea.appendChild(renderSignatureBlock());
+  container.appendChild(printArea);
 
-  return wrap;
+  var printBtn=el('<button class="btn secondary block" style="margin-top:16px;">طباعة / حفظ كـ PDF</button>');
+  printBtn.onclick=function(){ window.print(); };
+  container.appendChild(printBtn);
+
+  return container;
 }
+
+function renderDailyReport(){
+  var container=el('<div></div>');
+  var dateCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  dateCard.appendChild(el('<div class="section-title">اختر اليوم</div>'));
+  var dateInput=document.createElement('input');
+  dateInput.type='date'; dateInput.value = STATE.reportDate || todayStr();
+  dateInput.onchange=function(){ STATE.reportDate=dateInput.value; render(); };
+  dateCard.appendChild(dateInput);
+  container.appendChild(dateCard);
+
+  var date = STATE.reportDate || todayStr();
+  var contacts = contactsOnDate(date, null);
+  var manualToday = STATE.entries.filter(function(e){ return e.date===date && e.count>0; });
+
+  var printArea=el('<div class="report-print"></div>');
+  printArea.appendChild(el('<div class="section-title" style="font-size:15px;">التقرير اليومي — '+escapeHtml(date)+'</div>'));
+
+  var successCount = contacts.filter(function(c){ return c.status==='success'; }).length;
+  var failCount = contacts.filter(function(c){ return c.status==='failed'; }).length;
+  var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  statCard.appendChild(el(
+    '<div class="stat-grid">'+
+    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(successCount)+'</div><div class="lbl">نجاح</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failCount)+'</div><div class="lbl">فشل</div></div>'+
+    '<div class="stat-card"><div class="num">'+fmtNum(contacts.length)+'</div><div class="lbl">إجمالي المعالج</div></div>'+
+    '</div>'
+  ));
+  printArea.appendChild(statCard);
+
+  var tableCard=el('<div class="card"></div>');
+  tableCard.appendChild(el('<div class="section-title">تفاصيل جهات الاتصال</div>'));
+  if(contacts.length===0){
+    tableCard.appendChild(el('<div class="faint">لا توجد بيانات لهذا اليوم</div>'));
+  } else {
+    var tbl=document.createElement('table');
+    tbl.innerHTML='<thead><tr><th>العامل</th><th>الاسم</th><th>الهاتف</th><th>النوع</th><th>الحالة</th><th>السبب</th></tr></thead>';
+    var tbody=document.createElement('tbody');
+    contacts.slice().sort(function(a,b){
+      var an=getUser(a.assignedTo), bn=getUser(b.assignedTo);
+      return (an?an.name:'').localeCompare(bn?bn.name:'', 'ar');
+    }).forEach(function(c){
+      var agent=getUser(c.assignedTo);
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+(agent?escapeHtml(agent.name):'—')+'</td><td>'+escapeHtml(c.name||'—')+'</td>'+
+        '<td style="direction:ltr; text-align:right;">'+escapeHtml(c.phone||'—')+'</td>'+
+        '<td>'+(c.listType||'')+'</td><td>'+(c.status==='success'?'نجاح':'فشل')+'</td>'+
+        '<td>'+(c.status==='failed'?escapeHtml(c.reason||''):'—')+'</td>';
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    var twrap=el('<div class="preview-table-wrap" style="max-height:none;"></div>');
+    twrap.appendChild(tbl);
+    tableCard.appendChild(twrap);
+  }
+  printArea.appendChild(tableCard);
+
+  if(manualToday.length>0){
+    var manualCard=el('<div class="card" style="margin-top:14px;"></div>');
+    manualCard.appendChild(el('<div class="section-title">عمليات يدوية إضافية (خارج القائمة)</div>'));
+    var mtbl=document.createElement('table');
+    mtbl.innerHTML='<thead><tr><th>العامل</th><th>العدد</th></tr></thead>';
+    var mtbody=document.createElement('tbody');
+    manualToday.forEach(function(e){
+      var agent=getUser(e.userId);
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+(agent?escapeHtml(agent.name):'—')+'</td><td>'+fmtNum(e.count)+'</td>';
+      mtbody.appendChild(tr);
+    });
+    mtbl.appendChild(mtbody);
+    manualCard.appendChild(mtbl);
+    printArea.appendChild(manualCard);
+  }
+
+  printArea.appendChild(renderSignatureBlock());
+  container.appendChild(printArea);
+
+  var printBtn=el('<button class="btn secondary block" style="margin-top:16px;">طباعة / حفظ كـ PDF</button>');
+  printBtn.onclick=function(){ window.print(); };
+  container.appendChild(printBtn);
+
+  return container;
+}
+
+function renderIndividualReport(){
+  var container=el('<div></div>');
+  var agents=agentsOnly();
+  var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  pickCard.appendChild(el('<div class="section-title">اختر العامل والفترة</div>'));
+  var agentSel=document.createElement('select');
+  agentSel.appendChild(el('<option value="">— اختر عاملاً —</option>'));
+  agents.slice().sort(function(a,b){ return a.name.localeCompare(b.name,'ar'); }).forEach(function(a){
+    var o=document.createElement('option'); o.value=a.id; o.textContent=a.name+' ('+TEAM_LABEL[a.team]+')';
+    if(STATE.reportAgentId===a.id) o.selected=true;
+    agentSel.appendChild(o);
+  });
+  agentSel.onchange=function(){ STATE.reportAgentId=agentSel.value||null; render(); };
+  var f1=el('<div class="field"></div>'); f1.appendChild(agentSel); pickCard.appendChild(f1);
+
+  var periodSel=document.createElement('select');
+  periodSel.innerHTML='<option value="month">تقرير شهري</option><option value="day">تقرير يومي</option>';
+  periodSel.value=STATE.reportPeriodType;
+  periodSel.onchange=function(){ STATE.reportPeriodType=periodSel.value; render(); };
+  var f2=el('<div class="field"></div>'); f2.appendChild(periodSel); pickCard.appendChild(f2);
+
+  var periodValueInput=document.createElement('input');
+  if(STATE.reportPeriodType==='day'){
+    periodValueInput.type='date'; periodValueInput.value=STATE.reportDate||todayStr();
+    periodValueInput.onchange=function(){ STATE.reportDate=periodValueInput.value; render(); };
+  } else {
+    periodValueInput.type='month'; periodValueInput.value=STATE._reportMonth||currentMonthKey();
+    periodValueInput.onchange=function(){ STATE._reportMonth=periodValueInput.value; render(); };
+  }
+  pickCard.appendChild(periodValueInput);
+  container.appendChild(pickCard);
+
+  if(!STATE.reportAgentId){
+    container.appendChild(el('<div class="empty-state"><div class="icon">👤</div><div>اختر عاملاً لعرض تقريره المفصل</div></div>'));
+    return container;
+  }
+  var agent=getUser(STATE.reportAgentId);
+  if(!agent){ container.appendChild(el('<div class="faint">هذا العامل لم يعد موجوداً</div>')); return container; }
+
+  var contacts, periodLabel, manualEntries;
+  if(STATE.reportPeriodType==='day'){
+    var date=STATE.reportDate||todayStr();
+    contacts=contactsOnDate(date, agent.id);
+    periodLabel=date;
+    manualEntries=STATE.entries.filter(function(e){ return e.userId===agent.id && e.date===date && e.count>0; });
+  } else {
+    var month=STATE._reportMonth||currentMonthKey();
+    contacts=contactsForAgentMonth(agent.id, month);
+    periodLabel=arabicMonthLabel(month);
+    manualEntries=STATE.entries.filter(function(e){ return e.userId===agent.id && monthKey(e.date)===month && e.count>0; });
+  }
+
+  var printArea=el('<div class="report-print"></div>');
+  printArea.appendChild(el(
+    '<div class="section-title" style="font-size:15px;">تقرير فردي — '+escapeHtml(agent.name)+'</div>'+
+    '<div class="faint" style="margin-bottom:12px;">'+TEAM_LABEL[agent.team]+' — '+escapeHtml(periodLabel)+'</div>'
+  ));
+
+  var successCount=contacts.filter(function(c){ return c.status==='success'; }).length;
+  var failCount=contacts.filter(function(c){ return c.status==='failed'; }).length;
+  var manualTotal=manualEntries.reduce(function(s,e){ return s+e.count; }, 0);
+  var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  statCard.appendChild(el(
+    '<div class="stat-grid">'+
+    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(successCount)+'</div><div class="lbl">نجاح</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failCount)+'</div><div class="lbl">فشل</div></div>'+
+    '<div class="stat-card"><div class="num">'+fmtNum(manualTotal)+'</div><div class="lbl">يدوي إضافي</div></div>'+
+    '<div class="stat-card"><div class="num">'+fmtNum(successCount+manualTotal)+'</div><div class="lbl">الإجمالي المحتسب</div></div>'+
+    '</div>'
+  ));
+  printArea.appendChild(statCard);
+
+  var tableCard=el('<div class="card"></div>');
+  tableCard.appendChild(el('<div class="section-title">تفاصيل جهات الاتصال</div>'));
+  if(contacts.length===0){
+    tableCard.appendChild(el('<div class="faint">لا توجد بيانات لهذه الفترة</div>'));
+  } else {
+    var tbl=document.createElement('table');
+    tbl.innerHTML='<thead><tr><th>الاسم</th><th>الهاتف</th><th>النوع</th><th>التاريخ</th><th>الحالة</th><th>السبب</th></tr></thead>';
+    var tbody=document.createElement('tbody');
+    contacts.slice().sort(function(a,b){ return (a.actionDate||'').localeCompare(b.actionDate||''); }).forEach(function(c){
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+escapeHtml(c.name||'—')+'</td><td style="direction:ltr; text-align:right;">'+escapeHtml(c.phone||'—')+'</td>'+
+        '<td>'+(c.listType||'')+'</td><td>'+(c.actionDate||'')+'</td><td>'+(c.status==='success'?'نجاح':'فشل')+'</td>'+
+        '<td>'+(c.status==='failed'?escapeHtml(c.reason||''):'—')+'</td>';
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    var twrap=el('<div class="preview-table-wrap" style="max-height:none;"></div>');
+    twrap.appendChild(tbl);
+    tableCard.appendChild(twrap);
+  }
+  printArea.appendChild(tableCard);
+
+  if(failCount>0){
+    var reasonsCard=el('<div class="card" style="margin-top:14px;"></div>');
+    reasonsCard.appendChild(el('<div class="section-title">أسباب عدم النجاح</div>'));
+    var rmap={};
+    contacts.forEach(function(c){ if(c.status==='failed'){ rmap[c.reason]=(rmap[c.reason]||0)+1; } });
+    var rentries=Object.keys(rmap).map(function(k){ return {reason:k, count:rmap[k]}; }).sort(function(a,b){ return b.count-a.count; });
+    var maxR=rentries[0].count;
+    rentries.forEach(function(e2){
+      var pct=Math.round((e2.count/maxR)*100);
+      var row=el('<div class="reason-bar-row"></div>');
+      row.appendChild(el('<div class="rlabel">'+escapeHtml(e2.reason)+'</div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
+      row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
+      reasonsCard.appendChild(row);
+    });
+    printArea.appendChild(reasonsCard);
+  }
+
+  printArea.appendChild(renderSignatureBlock());
+  container.appendChild(printArea);
+
+  var printBtn=el('<button class="btn secondary block" style="margin-top:16px;">طباعة / حفظ كـ PDF</button>');
+  printBtn.onclick=function(){ window.print(); };
+  container.appendChild(printBtn);
+
+  return container;
+}
+
 function arabicMonthLabel(ym){
   var names=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
   var parts=ym.split('-');
@@ -1264,7 +1530,7 @@ function arabicMonthLabel(ym){
 
 function renderSettingsTab(){
   var wrap=el('<div class="card"></div>');
-  wrap.appendChild(el('<div class="section-title">إعدادات الأهداف والعمولة</div>'));
+  wrap.appendChild(el('<div class="section-title">إعدادات الأهداف</div>'));
 
   function numField(labelText, value, onSave){
     var f=el('<div class="field"></div>');
@@ -1275,13 +1541,22 @@ function renderSettingsTab(){
     f.appendChild(i);
     return f;
   }
+  function textField(labelText, value, onSave){
+    var f=el('<div class="field"></div>');
+    f.appendChild(el('<label>'+labelText+'</label>'));
+    var i=document.createElement('input');
+    i.type='text'; i.value=value||'';
+    i.onchange=function(){ onSave(i.value.trim()); };
+    f.appendChild(i);
+    return f;
+  }
 
   wrap.appendChild(numField('الهدف اليومي — فريق التفعيل (لكل عامل)', STATE.settings.dailyTargetActivation, async function(v){ STATE.settings.dailyTargetActivation=v; await saveSettings(); showToast('تم التحديث'); }));
   wrap.appendChild(numField('الهدف اليومي — فريق الاستخدام (لكل عامل)', STATE.settings.dailyTargetUsage, async function(v){ STATE.settings.dailyTargetUsage=v; await saveSettings(); showToast('تم التحديث'); }));
   wrap.appendChild(numField('الهدف الشهري — فريق التفعيل (كامل الفريق)', STATE.settings.monthlyTargetTeamActivation, async function(v){ STATE.settings.monthlyTargetTeamActivation=v; await saveSettings(); showToast('تم التحديث'); }));
   wrap.appendChild(numField('الهدف الشهري — فريق الاستخدام (كامل الفريق)', STATE.settings.monthlyTargetTeamUsage, async function(v){ STATE.settings.monthlyTargetTeamUsage=v; await saveSettings(); showToast('تم التحديث'); }));
   wrap.appendChild(el('<hr class="rule">'));
-  wrap.appendChild(numField('العمولة لكل عملية ناجحة (أوقية جديدة)', STATE.settings.commissionPerSuccess, async function(v){ STATE.settings.commissionPerSuccess=v; await saveSettings(); showToast('تم التحديث'); }));
+  wrap.appendChild(textField('اسم مدير السداد (يظهر في توقيع التقارير المطبوعة)', STATE.settings.directorName, async function(v){ STATE.settings.directorName=v; await saveSettings(); showToast('تم التحديث'); }));
 
   wrap.appendChild(el('<hr class="rule">'));
   wrap.appendChild(el('<div class="faint" style="font-size:12px;">ملاحظة: هذه البيانات مشتركة بين جميع من يفتح هذا التطبيق ويسجل الدخول. يمكن لكل عامل تعديل هدفه الفردي من تبويب «الفريق» إذا احتجت هدفاً مختلفاً عن الافتراضي.</div>'));
