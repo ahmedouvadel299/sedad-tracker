@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
-<title>سجل السداد — متابعة الفريق</title>
+<title>Registre SEDAD — Suivi de l'équipe</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=El+Messiri:wght@500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -317,7 +317,7 @@ var DEFAULT_SETTINGS = {
   directorName:''
 };
 
-var TEAM_LABEL = { 'تفعيل':'فريق التفعيل', 'استخدام':'فريق التحفيز على الاستخدام' };
+var TEAM_LABEL = { 'تفعيل':'Groupe contact client non valide', 'استخدام':'Groupe contact client inactif' };
 
 var REASONS = [
   'نسي كلمة السر',
@@ -386,7 +386,7 @@ function monthKey(dateStr){ return dateStr.slice(0,7); }
 function currentMonthKey(){ return monthKey(todayStr()); }
 function fmtNum(n){ return (n||0).toLocaleString('en-US'); }
 function weekdayShort(dateStr){
-  var days=['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
+  var days=['dim','lun','mar','mer','jeu','ven','sam'];
   var d=new Date(dateStr+'T00:00:00');
   return days[d.getDay()];
 }
@@ -408,14 +408,14 @@ function workdaysElapsedInMonth(){
 }
 
 /* ============================== STORAGE (Firebase Realtime Database) ==============================
-   هذه النسخة مستقلة عن Claude — تحتاج قاعدة بيانات Firebase مجانية.
-   1) أنشئ مشروع على https://console.firebase.google.com
-   2) فعّل Realtime Database (Build > Realtime Database > Create Database > Start in test mode)
-   3) انسخ رابط القاعدة من أعلى صفحة Realtime Database وضعه بدل القيمة أدناه
-   4) غيّر APP_KEY لأي كلمة خاصة بك (تعمل كمسار سري بسيط لبياناتك)
+   Cette version est indépendante de Claude — elle nécessite une base de données Firebase gratuite.
+   1) Créez un projet sur https://console.firebase.google.com
+   2) Activez Realtime Database (Build > Realtime Database > Create Database > Start in test mode)
+   3) Copiez l'URL de la base en haut de la page Realtime Database et remplacez la valeur ci-dessous
+   4) Changez APP_KEY par un mot qui vous est propre (sert de chemin secret simple pour vos données)
 ====================================================================================================== */
-var FIREBASE_DB_URL = "https://sedad-tracker-default-rtdb.europe-west1.firebasedatabase.app"; // مثال: https://sedad-tracker-12345-default-rtdb.firebaseio.com
-var APP_KEY = "sedad-app";          // غيّرها لكلمة خاصة بك، بدون فراغات
+var FIREBASE_DB_URL = "https://sedad-tracker-default-rtdb.europe-west1.firebasedatabase.app"; // exemple: https://sedad-tracker-12345-default-rtdb.firebaseio.com
+var APP_KEY = "sedad-app";          // à personnaliser, sans espaces
 
 function firebaseConfigured(){
   return FIREBASE_DB_URL && FIREBASE_DB_URL.indexOf('REPLACE-ME')===-1 && FIREBASE_DB_URL.indexOf('https://')===0;
@@ -453,19 +453,19 @@ async function loadAll(){
 }
 async function saveCalllists(){
   try{ await dbSet('calllists', STATE.calllists); }
-  catch(e){ showToast('تعذر الحفظ، تحقق من الاتصال بالإنترنت'); }
+  catch(e){ showToast('Échec de l\'enregistrement, vérifiez la connexion internet'); }
 }
 async function saveUsers(){
   try{ await dbSet('users', STATE.users); }
-  catch(e){ showToast('تعذر الحفظ، تحقق من الاتصال بالإنترنت'); }
+  catch(e){ showToast('Échec de l\'enregistrement, vérifiez la connexion internet'); }
 }
 async function saveEntries(){
   try{ await dbSet('entries', STATE.entries); }
-  catch(e){ showToast('تعذر الحفظ، تحقق من الاتصال بالإنترنت'); }
+  catch(e){ showToast('Échec de l\'enregistrement, vérifiez la connexion internet'); }
 }
 async function saveSettings(){
   try{ await dbSet('settings', STATE.settings); }
-  catch(e){ showToast('تعذر الحفظ، تحقق من الاتصال بالإنترنت'); }
+  catch(e){ showToast('Échec de l\'enregistrement, vérifiez la connexion internet'); }
 }
 
 
@@ -636,7 +636,7 @@ function addDaysStr(dateStr, n){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 function exportAoaToExcel(filename, sheetName, aoa){
-  if(typeof XLSX==='undefined'){ showToast('تعذر تحميل أداة Excel'); return; }
+  if(typeof XLSX==='undefined'){ showToast('Impossible de charger l\'outil Excel'); return; }
   var wb=XLSX.utils.book_new();
   var ws=XLSX.utils.aoa_to_sheet(aoa);
   XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0,31));
@@ -696,25 +696,25 @@ function render(){
   if(STATE.ready==='unconfigured'){
     app.appendChild(el(
       '<div class="login-wrap"><div class="stamp-card" style="max-width:440px; text-align:right;">'+
-      '<div class="login-title" style="text-align:center;">⚙️ إعداد أولي مطلوب</div>'+
-      '<div class="login-sub" style="text-align:center;">لم يتم ربط التطبيق بقاعدة بيانات بعد</div>'+
+      '<div class="login-title" style="text-align:center;">⚙️ Configuration requise</div>'+
+      '<div class="login-sub" style="text-align:center;">L\'application n\'est pas encore connectée à une base de données</div>'+
       '<div class="faint" style="line-height:1.9; font-size:13px;">'+
-      'افتح ملف <b style="color:var(--text)">index.html</b> من GitHub، اضغط على أيقونة القلم للتعديل، '+
-      'وابحث عن السطر:<br><code style="color:var(--accent);">var FIREBASE_DB_URL = "REPLACE-ME";</code><br>'+
-      'وضع بدلاً من REPLACE-ME رابط قاعدة بيانات Firebase الخاصة بك، ثم احفظ (Commit changes).'+
+      'Ouvrez le fichier <b style="color:var(--text)">index.html</b> sur GitHub, cliquez sur l\'icône crayon pour modifier, '+
+      'et cherchez la ligne :<br><code style="color:var(--accent);">var FIREBASE_DB_URL = "REPLACE-ME";</code><br>'+
+      'Remplacez REPLACE-ME par l\'URL de votre base Firebase, puis enregistrez (Commit changes).'+
       '</div></div></div>'
     ));
     return;
   }
   if(!STATE.ready){
-    app.appendChild(el('<div class="login-wrap"><div class="muted">جارٍ التحميل…</div></div>'));
+    app.appendChild(el('<div class="login-wrap"><div class="muted">Chargement…</div></div>'));
     return;
   }
   if(STATE.loadError){
     app.appendChild(el(
       '<div class="login-wrap"><div class="stamp-card" style="max-width:400px; text-align:center;">'+
-      '<div class="login-title">تعذر الاتصال بقاعدة البيانات</div>'+
-      '<div class="faint" style="margin-top:8px;">تحقق من رابط FIREBASE_DB_URL وقواعد الوصول (Rules) في Firebase، ثم أعد تحميل الصفحة</div>'+
+      '<div class="login-title">Connexion à la base de données impossible</div>'+
+      '<div class="faint" style="margin-top:8px;">Vérifiez l\'URL FIREBASE_DB_URL et les règles d\'accès (Rules) dans Firebase, puis rechargez la page</div>'+
       '</div></div>'
     ));
     return;
@@ -749,7 +749,7 @@ function renderActionModal(contactId, actionType){
   var overlay=el('<div class="modal-overlay"></div>');
   overlay.onclick=function(e){ if(e.target===overlay){ STATE.modal=null; render(); } };
   var sheet=el('<div class="modal-sheet"></div>');
-  var title = actionType==='success' ? 'تأكيد نجاح' : 'سبب عدم النجاح';
+  var title = actionType==='success' ? 'Confirmer la réussite' : 'Motif de l\'échec';
   sheet.appendChild(el('<div class="login-title" style="text-align:right; font-size:16px;">'+title+'</div>'));
   sheet.appendChild(el('<div class="faint" style="margin-bottom:10px;">'+(c?escapeHtml(c.name||''):'')+'</div>'));
 
@@ -757,7 +757,7 @@ function renderActionModal(contactId, actionType){
   if(actionType==='fail'){
     var grid=el('<div class="reason-grid"></div>');
     REASONS.forEach(function(r){
-      var chip=el('<div class="reason-chip">'+r+'</div>');
+      var chip=el('<div class="reason-chip">'+frReason(r)+'</div>');
       chip.onclick=function(){
         selected.reason=r;
         grid.querySelectorAll('.reason-chip').forEach(function(x){ x.classList.remove('selected'); });
@@ -767,9 +767,9 @@ function renderActionModal(contactId, actionType){
       grid.appendChild(chip);
     });
     sheet.appendChild(grid);
-    var customBox=el('<div class="field" style="display:none;"><label>وضّح السبب</label></div>');
+    var customBox=el('<div class="field" style="display:none;"><label>Précisez le motif</label></div>');
     var customInput=document.createElement('input');
-    customInput.placeholder='اكتب السبب هنا...';
+    customInput.placeholder='Écrivez le motif ici...';
     customInput.oninput=function(){ selected.custom=customInput.value; };
     customBox.appendChild(customInput);
     sheet.appendChild(customBox);
@@ -778,31 +778,31 @@ function renderActionModal(contactId, actionType){
   var callStart = STATE.callStarts[contactId];
   var autoSeconds = callStart ? Math.round((Date.now()-callStart)/1000) : null;
 
-  sheet.appendChild(el('<div class="section-title" style="margin-top:14px;">مدة المكالمة</div>'));
+  sheet.appendChild(el('<div class="section-title" style="margin-top:14px;">Durée de l\'appel</div>'));
   var minInput, secInput;
   if(autoSeconds!==null){
     sheet.appendChild(el(
       '<div class="card" style="background:var(--activation-soft); border-color:var(--activation); padding:12px;">'+
-      '<div style="font-family:\'El Messiri\',serif; font-size:20px; font-weight:700; color:var(--activation);">'+fmtDuration(autoSeconds)+'</div>'+
-      '<div class="faint" style="font-size:11px; margin-top:2px;">تم قياسها تلقائياً من وقت الضغط على زر الاتصال 📞 — لا يمكن تعديلها</div>'+
+      '<div style="font-family:\'El Messiri\',serif; font-size:20px; font-weight:700; color:var(--activation);">'+fmtDurationFr(autoSeconds)+'</div>'+
+      '<div class="faint" style="font-size:11px; margin-top:2px;">Mesurée automatiquement depuis l\'appui sur le bouton d\'appel 📞 — non modifiable</div>'+
       '</div>'
     ));
   } else {
     sheet.appendChild(el(
-      '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">لم تضغط زر الاتصال 📞 قبل هذا — أدخل المدة يدوياً (سيُعلَّم هذا الإدخال للمراجعة)</div>'
+      '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">Vous n\'avez pas appuyé sur le bouton d\'appel 📞 — saisissez la durée manuellement (sera marqué pour vérification)</div>'
     ));
     var durRow=el('<div class="row"></div>');
-    minInput=document.createElement('input'); minInput.type='number'; minInput.min='0'; minInput.placeholder='دقائق'; minInput.value='0';
-    secInput=document.createElement('input'); secInput.type='number'; secInput.min='0'; secInput.max='59'; secInput.placeholder='ثواني'; secInput.value='0';
-    var f1=el('<div class="field" style="flex:1;"><label>دقائق</label></div>'); f1.appendChild(minInput);
-    var f2=el('<div class="field" style="flex:1;"><label>ثواني</label></div>'); f2.appendChild(secInput);
+    minInput=document.createElement('input'); minInput.type='number'; minInput.min='0'; minInput.placeholder='minutes'; minInput.value='0';
+    secInput=document.createElement('input'); secInput.type='number'; secInput.min='0'; secInput.max='59'; secInput.placeholder='secondes'; secInput.value='0';
+    var f1=el('<div class="field" style="flex:1;"><label>Minutes</label></div>'); f1.appendChild(minInput);
+    var f2=el('<div class="field" style="flex:1;"><label>Secondes</label></div>'); f2.appendChild(secInput);
     durRow.appendChild(f1); durRow.appendChild(f2);
     sheet.appendChild(durRow);
   }
 
-  var confirmBtn=el('<button class="btn block" style="margin-top:6px;">تأكيد</button>');
+  var confirmBtn=el('<button class="btn block" style="margin-top:6px;">Confirmer</button>');
   confirmBtn.onclick=async function(){
-    if(actionType==='fail' && !selected.reason){ showToast('اختر سبباً أولاً'); return; }
+    if(actionType==='fail' && !selected.reason){ showToast('Choisissez un motif d\'abord'); return; }
     var durationSeconds, autoTimed;
     if(autoSeconds!==null){
       durationSeconds=autoSeconds; autoTimed=true;
@@ -823,11 +823,11 @@ function renderActionModal(contactId, actionType){
     delete STATE.callStarts[contactId];
     await saveCalllists();
     STATE.modal=null;
-    showToast('تم الحفظ');
+    showToast('Enregistré');
     render();
   };
   sheet.appendChild(confirmBtn);
-  var cancelBtn=el('<button class="btn ghost block" style="margin-top:8px;">إلغاء</button>');
+  var cancelBtn=el('<button class="btn ghost block" style="margin-top:8px;">Annuler</button>');
   cancelBtn.onclick=function(){ STATE.modal=null; render(); };
   sheet.appendChild(cancelBtn);
 
@@ -841,50 +841,50 @@ function renderEditUserModal(userId){
   var overlay=el('<div class="modal-overlay"></div>');
   overlay.onclick=function(e){ if(e.target===overlay){ STATE.modal=null; render(); } };
   var sheet=el('<div class="modal-sheet"></div>');
-  if(!u){ sheet.appendChild(el('<div class="faint">هذا العضو لم يعد موجوداً</div>')); overlay.appendChild(sheet); return overlay; }
+  if(!u){ sheet.appendChild(el('<div class="faint">Ce membre n\'existe plus</div>')); overlay.appendChild(sheet); return overlay; }
 
-  sheet.appendChild(el('<div class="login-title" style="text-align:right; font-size:16px;">تعديل بيانات العضو</div>'));
+  sheet.appendChild(el('<div class="login-title" style="text-align:right; font-size:16px;">Modifier les informations du membre</div>'));
   sheet.appendChild(el('<div class="faint" style="margin-bottom:10px;">'+roleLabel(u)+'</div>'));
 
-  var nameField=el('<div class="field"><label>الاسم</label></div>');
+  var nameField=el('<div class="field"><label>Nom</label></div>');
   var nameInput=document.createElement('input'); nameInput.value=u.name;
   nameField.appendChild(nameInput);
   sheet.appendChild(nameField);
 
   var teamSelect=null;
   if(u.role==='agent'){
-    var teamField=el('<div class="field"><label>الفريق</label></div>');
+    var teamField=el('<div class="field"><label>Équipe</label></div>');
     teamSelect=document.createElement('select');
-    teamSelect.innerHTML='<option value="تفعيل">فريق التفعيل</option><option value="استخدام">فريق التحفيز على الاستخدام</option>';
+    teamSelect.innerHTML='<option value="تفعيل">Groupe contact client non valide</option><option value="استخدام">Groupe contact client inactif</option>';
     teamSelect.value=u.team;
     teamField.appendChild(teamSelect);
     sheet.appendChild(teamField);
   }
 
-  var pinField=el('<div class="field"><label>رمز الدخول الجديد (اتركه فارغاً لعدم التغيير)</label></div>');
+  var pinField=el('<div class="field"><label>Nouveau code PIN (laisser vide pour ne pas changer)</label></div>');
   var pinInput=document.createElement('input'); pinInput.placeholder='••••'; pinInput.maxLength=4; pinInput.inputMode='numeric';
   pinField.appendChild(pinInput);
   sheet.appendChild(pinField);
 
   var errBox=el('<div></div>'); sheet.appendChild(errBox);
 
-  var saveBtn=el('<button class="btn block">حفظ التعديلات</button>');
+  var saveBtn=el('<button class="btn block">Enregistrer les modifications</button>');
   saveBtn.onclick=async function(){
     var newName=nameInput.value.trim();
     var newPin=pinInput.value.trim();
     errBox.innerHTML='';
-    if(!newName){ errBox.appendChild(el('<div class="error-msg">الاسم مطلوب</div>')); return; }
-    if(newPin && !/^\d{4}$/.test(newPin)){ errBox.appendChild(el('<div class="error-msg">رمز الدخول يجب أن يكون 4 أرقام</div>')); return; }
+    if(!newName){ errBox.appendChild(el('<div class="error-msg">Le nom est requis</div>')); return; }
+    if(newPin && !/^\d{4}$/.test(newPin)){ errBox.appendChild(el('<div class="error-msg">Le code PIN doit comporter 4 chiffres</div>')); return; }
     u.name=newName;
     if(teamSelect) u.team=teamSelect.value;
     if(newPin) u.pin=newPin;
     await saveUsers();
     STATE.modal=null;
-    showToast('تم حفظ التعديلات ✓');
+    showToast('Modifications enregistrées ✓');
     render();
   };
   sheet.appendChild(saveBtn);
-  var cancelBtn=el('<button class="btn ghost block" style="margin-top:8px;">إلغاء</button>');
+  var cancelBtn=el('<button class="btn ghost block" style="margin-top:8px;">Annuler</button>');
   cancelBtn.onclick=function(){ STATE.modal=null; render(); };
   sheet.appendChild(cancelBtn);
 
@@ -894,21 +894,21 @@ function renderEditUserModal(userId){
 function renderTopbar(user){
   var bar=el('<div class="topbar"></div>');
   bar.appendChild(el(
-    '<div class="brand"><div class="mark">س</div><div><div class="name">سجل السداد</div>'+
+    '<div class="brand"><div class="mark">S</div><div><div class="name">Registre SEDAD</div>'+
     '<div class="sub">البنك الموريتاني للاستثمار</div></div></div>'
   ));
   var right=el('<div class="row"></div>');
   right.appendChild(el('<div class="whoami">'+roleLabel(user)+' — <b>'+escapeHtml(user.name)+'</b></div>'));
-  var btn=el('<button class="logout-btn">خروج</button>');
+  var btn=el('<button class="logout-btn">Déconnexion</button>');
   btn.onclick=function(){ STATE.currentUserId=null; STATE.pinBuffer=''; STATE.loginStep='name'; STATE.loginSelectedUser=null; render(); };
   right.appendChild(btn);
   bar.appendChild(right);
   return bar;
 }
 function roleLabel(u){
-  if(u.role==='admin') return 'رئيس السنتر';
-  if(u.role==='assistant') return 'المساعدة';
-  return TEAM_LABEL[u.team] || 'عامل اتصال';
+  if(u.role==='admin') return 'Responsable de centre contact';
+  if(u.role==='assistant') return 'Assistante';
+  return TEAM_LABEL[u.team] || 'Agent';
 }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 
@@ -917,21 +917,21 @@ function renderSetup(){
   var wrap=el('<div class="login-wrap"><div class="stamp-card" style="max-width:420px;"></div></div>');
   var card=wrap.querySelector('.stamp-card');
   card.appendChild(el(
-    '<div class="login-title">إعداد الحساب الأول</div>'+
-    '<div class="login-sub">أنشئ حساب رئيس السنتر أولاً، ثم يمكنك إضافة الفريق</div>'
+    '<div class="login-title">Configuration initiale</div>'+
+    '<div class="login-sub">Créez d\'abord le compte du responsable de centre contact, puis ajoutez l\'équipe</div>'
   ));
   var form=el('<div></div>');
-  form.appendChild(el('<div class="field"><label>الاسم الكامل</label><input id="su-name" placeholder="مثال: أحمدو"/></div>'));
-  form.appendChild(el('<div class="field"><label>رمز دخول من 4 أرقام (PIN)</label><input id="su-pin" inputmode="numeric" maxlength="4" placeholder="••••"/></div>'));
+  form.appendChild(el('<div class="field"><label>Nom complet</label><input id="su-name" placeholder="Ex: Ahmed"/></div>'));
+  form.appendChild(el('<div class="field"><label>Code PIN à 4 chiffres</label><input id="su-pin" inputmode="numeric" maxlength="4" placeholder="••••"/></div>'));
   var errBox=el('<div></div>');
   form.appendChild(errBox);
-  var btn=el('<button class="btn block">إنشاء الحساب والمتابعة</button>');
+  var btn=el('<button class="btn block">Créer le compte et continuer</button>');
   btn.onclick=async function(){
     var name=document.getElementById('su-name').value.trim();
     var pin=document.getElementById('su-pin').value.trim();
     errBox.innerHTML='';
     if(!name || !/^\d{4}$/.test(pin)){
-      errBox.appendChild(el('<div class="error-msg">الرجاء إدخال الاسم ورمز مكوّن من 4 أرقام</div>'));
+      errBox.appendChild(el('<div class="error-msg">Veuillez saisir le nom et un code à 4 chiffres</div>'));
       return;
     }
     var admin={ id:uid(), name:name, role:'admin', team:null, pin:pin, dailyTarget:null };
@@ -950,13 +950,13 @@ function renderLogin(){
   var wrap=el('<div class="login-wrap"><div class="stamp-card"></div></div>');
   var card=wrap.querySelector('.stamp-card');
   card.appendChild(el(stampRingSvg(0,'#C9A227')));
-  card.appendChild(el('<div class="login-title">تسجيل الدخول</div><div class="login-sub">سجل السداد — إدارة السداد</div>'));
+  card.appendChild(el('<div class="login-title">Connexion</div><div class="login-sub">Registre SEDAD — Gestion SEDAD</div>'));
 
   if(STATE.loginStep==='name'){
     var sel=el('<div></div>');
-    sel.appendChild(el('<label>اختر اسمك</label>'));
+    sel.appendChild(el('<label>Choisissez votre nom</label>'));
     var selectEl=document.createElement('select');
-    selectEl.appendChild(el('<option value="">-- اختر --</option>'));
+    selectEl.appendChild(el('<option value="">-- Choisir --</option>'));
     STATE.users.slice().sort(function(a,b){ return a.name.localeCompare(b.name,'ar'); }).forEach(function(u){
       var opt=document.createElement('option');
       opt.value=u.id; opt.textContent=u.name+' ('+roleLabel(u)+')';
@@ -964,9 +964,9 @@ function renderLogin(){
     });
     sel.appendChild(selectEl);
     card.appendChild(sel);
-    var nextBtn=el('<button class="btn block" style="margin-top:16px;">متابعة</button>');
+    var nextBtn=el('<button class="btn block" style="margin-top:16px;">Continuer</button>');
     nextBtn.onclick=function(){
-      if(!selectEl.value){ showToast('اختر اسمك أولاً'); return; }
+      if(!selectEl.value){ showToast('Choisissez votre nom d\'abord'); return; }
       STATE.loginSelectedUser=selectEl.value;
       STATE.loginStep='pin';
       STATE.pinBuffer='';
@@ -976,7 +976,7 @@ function renderLogin(){
   } else {
     var u=getUser(STATE.loginSelectedUser);
     card.appendChild(el('<div style="text-align:center; font-weight:600; margin-bottom:8px;">'+escapeHtml(u.name)+'</div>'));
-    card.appendChild(el('<div class="login-sub">أدخل رمز الدخول (PIN)</div>'));
+    card.appendChild(el('<div class="login-sub">Entrez votre code PIN</div>'));
     var dots=el('<div class="pin-dots">'+[0,1,2,3].map(function(i){ return '<span class="'+(i<STATE.pinBuffer.length?'filled':'')+'"></span>'; }).join('')+'</div>');
     card.appendChild(dots);
     var errBox=el('<div id="login-err"></div>');
@@ -985,13 +985,13 @@ function renderLogin(){
     ['1','2','3','4','5','6','7','8','9','back','0','ok'].forEach(function(k){
       var b=document.createElement('button');
       if(k==='back'){ b.textContent='⌫'; b.className='wide'; }
-      else if(k==='ok'){ b.textContent='دخول'; b.className='wide'; }
+      else if(k==='ok'){ b.textContent='Entrer'; b.className='wide'; }
       else b.textContent=k;
       b.onclick=function(){ handleKeypad(k); };
       pad.appendChild(b);
     });
     card.appendChild(pad);
-    var backLink=el('<button class="btn ghost block" style="margin-top:14px;">رجوع</button>');
+    var backLink=el('<button class="btn ghost block" style="margin-top:14px;">Retour</button>');
     backLink.onclick=function(){ STATE.loginStep='name'; STATE.loginSelectedUser=null; STATE.pinBuffer=''; render(); };
     card.appendChild(backLink);
   }
@@ -1013,7 +1013,7 @@ function attemptLogin(){
     render();
   } else {
     var box=document.getElementById('login-err');
-    if(box) box.innerHTML='<div class="error-msg">رمز غير صحيح، حاول مجدداً</div>';
+    if(box) box.innerHTML='<div class="error-msg">Code incorrect, réessayez</div>';
     STATE.pinBuffer='';
     setTimeout(render, 350);
   }
@@ -1046,9 +1046,9 @@ function renderAgentView(user){
 
   var pendingCount=pendingContactsFor(user.id).length;
   var tabs=el('<div class="tabs"></div>');
-  var t1=el('<div class="tab '+(STATE.agentTab==='today'?'active':'')+'">اليوم</div>');
+  var t1=el('<div class="tab '+(STATE.agentTab==='today'?'active':'')+'">Aujourd\'hui</div>');
   t1.onclick=function(){ STATE.agentTab='today'; render(); };
-  var t2=el('<div class="tab '+(STATE.agentTab==='list'?'active':'')+'">قائمتي'+(pendingCount?' ('+pendingCount+')':'')+'</div>');
+  var t2=el('<div class="tab '+(STATE.agentTab==='list'?'active':'')+'">Ma liste'+(pendingCount?' ('+pendingCount+')':'')+'</div>');
   t2.onclick=function(){ STATE.agentTab='list'; render(); };
   tabs.appendChild(t1); tabs.appendChild(t2);
   wrap.appendChild(tabs);
@@ -1065,18 +1065,18 @@ function renderAgentView(user){
     var remaining = Math.max(0, target-todayCount);
     wrap.appendChild(el(
       '<div class="card" style="border-color:var(--danger); background:var(--danger-soft); margin-bottom:14px;">'+
-      '<div style="font-weight:600; color:#f0b3ae; font-size:13.5px;">⚠ أنت متأخر عن وتيرتك اليومية</div>'+
-      '<div class="faint" style="font-size:12px; margin-top:4px;">باقي '+fmtNum(remaining)+' عملية لتحقيق هدف اليوم</div>'+
+      '<div style="font-weight:600; color:#f0b3ae; font-size:13.5px;">⚠ Vous êtes en retard sur votre rythme quotidien</div>'+
+      '<div class="faint" style="font-size:12px; margin-top:4px;">Il reste '+fmtNum(remaining)+' opérations pour atteindre l\'objectif du jour</div>'+
       '</div>'
     ));
   }
 
   var counterCard=el('<div class="card counter-card"></div>');
-  counterCard.appendChild(el(stampRingSvg(pct, ringColor, 190, fmtNum(todayCount), 'من '+fmtNum(target)+' اليوم')));
+  counterCard.appendChild(el(stampRingSvg(pct, ringColor, 190, fmtNum(todayCount), 'sur '+fmtNum(target)+' aujourd\'hui')));
 
   var fromList=listSuccessesForUserOnDate(user.id, todayStr());
   if(fromList>0){
-    counterCard.appendChild(el('<div class="faint" style="font-size:12px; margin-top:-6px;">منها '+fmtNum(fromList)+' من «قائمتي» تلقائياً</div>'));
+    counterCard.appendChild(el('<div class="faint" style="font-size:12px; margin-top:-6px;">dont '+fmtNum(fromList)+' automatiquement depuis « Ma liste »</div>'));
   }
   wrap.appendChild(counterCard);
 
@@ -1084,10 +1084,10 @@ function renderAgentView(user){
   var starsStr = '★'.repeat(rating.stars) + '☆'.repeat(5-rating.stars);
   var ratingCard=el(
     '<div class="card" style="margin-top:14px; text-align:center; padding:16px;">'+
-    '<div class="faint" style="font-size:11.5px; margin-bottom:6px;">تقييم هذا الأسبوع</div>'+
+    '<div class="faint" style="font-size:11.5px; margin-bottom:6px;">Évaluation de la semaine</div>'+
     '<div style="font-size:26px; color:var(--accent); letter-spacing:2px;">'+starsStr+'</div>'+
-    '<div class="faint" style="font-size:11px; margin-top:6px;">'+fmtNum(rating.achieved)+' من '+fmtNum(rating.weeklyTarget)+' هذا الأسبوع'+
-    (rating.successRate!=null ? (' — معدل النجاح '+Math.round(rating.successRate*100)+'%') : '')+'</div>'+
+    '<div class="faint" style="font-size:11px; margin-top:6px;">'+fmtNum(rating.achieved)+' sur '+fmtNum(rating.weeklyTarget)+' cette semaine'+
+    (rating.successRate!=null ? (' — taux de réussite '+Math.round(rating.successRate*100)+'%') : '')+'</div>'+
     '</div>'
   );
   wrap.appendChild(ratingCard);
@@ -1096,13 +1096,13 @@ function renderAgentView(user){
   var mTotal=combinedMonthTotal(user.id);
   var mSuccess=listSuccessesMonthForUser(user.id, currentMonthKey());
   var statGrid=el('<div class="stat-grid" style="margin-top:16px;"></div>');
-  statGrid.appendChild(el('<div class="stat-card"><div class="num">'+fmtNum(mTotal)+'</div><div class="lbl">إجمالي هذا الشهر</div></div>'));
-  statGrid.appendChild(el('<div class="stat-card"><div class="num">'+fmtNum(mSuccess)+'</div><div class="lbl">نجاح من القائمة هذا الشهر</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num">'+fmtNum(mTotal)+'</div><div class="lbl">Total ce mois-ci</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num">'+fmtNum(mSuccess)+'</div><div class="lbl">Réussites de la liste ce mois-ci</div></div>'));
   wrap.appendChild(statGrid);
 
   // history
   var histCard=el('<div class="card" style="margin-top:14px;"></div>');
-  histCard.appendChild(el('<div class="section-title">آخر 7 أيام</div>'));
+  histCard.appendChild(el('<div class="section-title">7 derniers jours</div>'));
   last7Days(user.id).forEach(function(d){
     var total = d.count + listSuccessesForUserOnDate(user.id, d.date);
     var p = target>0 ? Math.min(100, Math.round((total/target)*100)) : 0;
@@ -1123,9 +1123,9 @@ function renderAgentListTab(user){
   var doneToday=doneContactsForToday(user.id);
 
   var card=el('<div class="card"></div>');
-  card.appendChild(el('<div class="section-title">جهات اتصال بانتظار المعالجة ('+pending.length+')</div>'));
+  card.appendChild(el('<div class="section-title">Contacts en attente de traitement ('+pending.length+')</div>'));
   if(pending.length===0){
-    card.appendChild(el('<div class="empty-state"><div class="icon">✅</div><div>لا توجد جهات اتصال متبقية في قائمتك حالياً</div></div>'));
+    card.appendChild(el('<div class="empty-state"><div class="icon">✅</div><div>Aucun contact restant dans votre liste actuellement</div></div>'));
   } else {
     pending.forEach(function(c){
       card.appendChild(contactRow(c));
@@ -1135,7 +1135,7 @@ function renderAgentListTab(user){
 
   if(doneToday.length>0){
     var doneCard=el('<div class="card" style="margin-top:14px;"></div>');
-    doneCard.appendChild(el('<div class="section-title">تمت معالجتهم اليوم ('+doneToday.length+')</div>'));
+    doneCard.appendChild(el('<div class="section-title">Traités aujourd\'hui ('+doneToday.length+')</div>'));
     doneToday.forEach(function(c){ doneCard.appendChild(contactRow(c, true)); });
     wrap.appendChild(doneCard);
   }
@@ -1146,17 +1146,17 @@ function renderAgentListTab(user){
 function contactRow(c, readOnly){
   var row=el('<div class="contact-row"></div>');
   var meta=el('<div class="cmeta"></div>');
-  meta.appendChild(el('<div class="cname">'+escapeHtml(c.name||'بدون اسم')+'</div>'));
+  meta.appendChild(el('<div class="cname">'+escapeHtml(c.name||'Sans nom')+'</div>'));
   if(c.phone) meta.appendChild(el('<div class="cphone">'+escapeHtml(c.phone)+'</div>'));
   if(!readOnly && c.lastAttempt && c.lastAttempt.actionDate){
     meta.appendChild(el(
-      '<div class="faint" style="font-size:11px; margin-top:3px; color:var(--accent);">↻ آخر محاولة: قبل '+daysSince(c.lastAttempt.actionDate)+' يوماً — '+escapeHtml(frReason(c.lastAttempt.reason)||c.lastAttempt.reason||'')+'</div>'
+      '<div class="faint" style="font-size:11px; margin-top:3px; color:var(--accent);">↻ Dernière tentative il y a '+daysSince(c.lastAttempt.actionDate)+' jours — '+escapeHtml(frReason(c.lastAttempt.reason)||c.lastAttempt.reason||'')+'</div>'
     ));
   }
   if(readOnly){
     var pillClass = c.status==='success' ? 'success' : 'failed';
-    var pillLabel = c.status==='success' ? 'نجاح' : ('فشل — '+(c.reason||''));
-    var extra = (c.actionAt?fmtTime(c.actionAt):'') + (c.callDurationSeconds!=null?(' — مدة: '+fmtDuration(c.callDurationSeconds)):'') + (c.autoTimed===false?' ⚠ يدوي':'');
+    var pillLabel = c.status==='success' ? 'Réussi' : ('Échec — '+(frReason(c.reason)||''));
+    var extra = (c.actionAt?fmtTime(c.actionAt):'') + (c.callDurationSeconds!=null?(' — durée: '+fmtDurationFr(c.callDurationSeconds)):'') + (c.autoTimed===false?' ⚠ manuel':'');
     meta.appendChild(el('<div style="margin-top:5px;"><span class="status-pill '+pillClass+'">'+escapeHtml(pillLabel)+'</span></div>'));
     if(extra.trim()) meta.appendChild(el('<div class="faint" style="font-size:11px; margin-top:3px;">'+escapeHtml(extra)+'</div>'));
   }
@@ -1166,9 +1166,9 @@ function contactRow(c, readOnly){
     var started = !!STATE.callStarts[c.id];
     var callBtn=el('<button class="icon-btn" style="border-color:var(--accent); color:var(--accent);'+(started?' background:var(--accent-soft);':'')+'">'+(started?'⏱':'📞')+'</button>');
     callBtn.onclick=function(){
-      if(!c.phone){ showToast('لا يوجد رقم هاتف مسجّل لهذه الجهة'); return; }
+      if(!c.phone){ showToast('Aucun numéro de téléphone enregistré pour ce contact'); return; }
       STATE.callStarts[c.id]=Date.now();
-      showToast('بدأ التوقيت — اضغط ✓ أو ✕ بعد انتهاء المكالمة');
+      showToast('Chronométrage démarré — appuyez sur ✓ ou ✕ après l\'appel');
       window.location.href='tel:'+String(c.phone).replace(/[^+\d]/g,'');
       render();
     };
@@ -1194,12 +1194,12 @@ function renderAdminView(user){
   var wrap=el('<div></div>');
   var tabs=el('<div class="tabs"></div>');
   var tabDefs=[
-    {k:'overview', l:'نظرة عامة'},
-    {k:'lists', l:'القوائم'},
-    {k:'agents', l:'الفريق'},
-    {k:'reports', l:'التقرير الشهري'},
+    {k:'overview', l:'Vue d\'ensemble'},
+    {k:'lists', l:'Listes'},
+    {k:'agents', l:'Équipe'},
+    {k:'reports', l:'Rapports'},
   ];
-  if(user.role==='admin') tabDefs.push({k:'settings', l:'الإعدادات'});
+  if(user.role==='admin') tabDefs.push({k:'settings', l:'Paramètres'});
   tabDefs.forEach(function(t){
     var b=el('<div class="tab '+(STATE.adminTab===t.k?'active':'')+'">'+t.l+'</div>');
     b.onclick=function(){ STATE.adminTab=t.k; render(); };
@@ -1223,8 +1223,8 @@ function renderOverviewTab(){
   if(actAgents.length===0 && useAgents.length===0){
     wrap.appendChild(el(
       '<div class="empty-state"><div class="icon">👥</div>'+
-      '<div>لا يوجد أعضاء بعد في الفريق</div>'+
-      '<div class="faint" style="margin-top:6px;">اذهب إلى تبويب «الفريق» لإضافة العمال</div></div>'
+      '<div>Aucun membre dans l\'équipe pour le moment</div>'+
+      '<div class="faint" style="margin-top:6px;">Allez dans l\'onglet « Équipe » pour ajouter des agents</div></div>'
     ));
     return wrap;
   }
@@ -1232,31 +1232,31 @@ function renderOverviewTab(){
   var statGrid=el('<div class="stat-grid"></div>');
   var actToday=teamTodayTotal('تفعيل'), useToday=teamTodayTotal('استخدام');
   var actMonth=teamMonthTotal('تفعيل'), useMonth=teamMonthTotal('استخدام');
-  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actToday)+'</div><div class="lbl">تفعيل — اليوم</div></div>'));
-  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useToday)+'</div><div class="lbl">استخدام — اليوم</div></div>'));
-  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamActivation)+'</span></div><div class="lbl">تفعيل — هذا الشهر</div></div>'));
-  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamUsage)+'</span></div><div class="lbl">استخدام — هذا الشهر</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actToday)+'</div><div class="lbl">Non valide — aujourd\'hui</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useToday)+'</div><div class="lbl">Inactif — aujourd\'hui</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamActivation)+'</span></div><div class="lbl">Non valide — ce mois-ci</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamUsage)+'</span></div><div class="lbl">Inactif — ce mois-ci</div></div>'));
   wrap.appendChild(statGrid);
 
   var month = currentMonthKey();
   var actRate = teamSuccessRateMonth('تفعيل', month), useRate = teamSuccessRateMonth('استخدام', month);
   var rateGrid=el('<div class="stat-grid" style="margin-top:0;"></div>');
-  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+(actRate!=null?actRate+'%':'—')+'</div><div class="lbl">معدل النجاح — تفعيل</div></div>'));
-  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+(useRate!=null?useRate+'%':'—')+'</div><div class="lbl">معدل النجاح — استخدام</div></div>'));
+  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+(actRate!=null?actRate+'%':'—')+'</div><div class="lbl">Taux de réussite — Non valide</div></div>'));
+  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+(useRate!=null?useRate+'%':'—')+'</div><div class="lbl">Taux de réussite — Inactif</div></div>'));
   wrap.appendChild(rateGrid);
 
   var hourlyStats = hourlySuccessStats();
   if(hourlyStats.length>0){
     var hourCard=el('<div class="card" style="margin-top:14px;"></div>');
-    hourCard.appendChild(el('<div class="section-title">أفضل أوقات الاتصال (حسب معدل النجاح)</div>'));
+    hourCard.appendChild(el('<div class="section-title">Meilleurs horaires d\'appel (selon le taux de réussite)</div>'));
     hourlyStats.slice(0,3).forEach(function(h){
       var row=el('<div class="reason-bar-row"></div>');
-      row.appendChild(el('<div class="rlabel">الساعة '+String(h.hour).padStart(2,'0')+':00</div>'));
+      row.appendChild(el('<div class="rlabel">'+String(h.hour).padStart(2,'0')+':00</div>'));
       row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+h.rate+'%; background:#5AA57C;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+h.rate+'%</div>'));
       hourCard.appendChild(row);
     });
-    hourCard.appendChild(el('<div class="faint" style="font-size:11px; margin-top:8px;">مبني على المكالمات المسجّلة تلقائياً (زر 📞) بعدد كافٍ من العينات لكل ساعة</div>'));
+    hourCard.appendChild(el('<div class="faint" style="font-size:11px; margin-top:8px;">Basé sur les appels chronométrés automatiquement (bouton 📞) avec un échantillon suffisant par heure</div>'));
     wrap.appendChild(hourCard);
   }
 
@@ -1294,30 +1294,30 @@ function renderAgentsTab(currentUser){
 
   if(isAdmin){
     var addCard=el('<div class="card" style="margin-bottom:16px;"></div>');
-    addCard.appendChild(el('<div class="section-title">إضافة عضو جديد</div>'));
+    addCard.appendChild(el('<div class="section-title">Ajouter un nouveau membre</div>'));
     var nameInput=document.createElement('input');
-    nameInput.placeholder='الاسم الكامل';
+    nameInput.placeholder='Nom complet';
     var teamSelect=document.createElement('select');
-    teamSelect.innerHTML='<option value="تفعيل">فريق التفعيل</option><option value="استخدام">فريق التحفيز على الاستخدام</option><option value="assistant">مساعدة (بدون فريق)</option>';
+    teamSelect.innerHTML='<option value="تفعيل">Groupe contact client non valide</option><option value="استخدام">Groupe contact client inactif</option><option value="assistant">Assistante (sans équipe)</option>';
     var pinInput=document.createElement('input');
-    pinInput.placeholder='رمز دخول من 4 أرقام'; pinInput.maxLength=4; pinInput.inputMode='numeric';
+    pinInput.placeholder='Code PIN à 4 chiffres'; pinInput.maxLength=4; pinInput.inputMode='numeric';
 
-    var f1=el('<div class="field"></div>'); f1.appendChild(el('<label>الاسم</label>')); f1.appendChild(nameInput); addCard.appendChild(f1);
-    var f2=el('<div class="field"></div>'); f2.appendChild(el('<label>الفريق / الدور</label>')); f2.appendChild(teamSelect); addCard.appendChild(f2);
-    var f3=el('<div class="field"></div>'); f3.appendChild(el('<label>رمز الدخول (PIN)</label>')); f3.appendChild(pinInput); addCard.appendChild(f3);
+    var f1=el('<div class="field"></div>'); f1.appendChild(el('<label>Nom</label>')); f1.appendChild(nameInput); addCard.appendChild(f1);
+    var f2=el('<div class="field"></div>'); f2.appendChild(el('<label>Équipe / Rôle</label>')); f2.appendChild(teamSelect); addCard.appendChild(f2);
+    var f3=el('<div class="field"></div>'); f3.appendChild(el('<label>Code PIN</label>')); f3.appendChild(pinInput); addCard.appendChild(f3);
 
-    var addBtn=el('<button class="btn block">إضافة إلى الفريق</button>');
+    var addBtn=el('<button class="btn block">Ajouter à l\'équipe</button>');
     addBtn.onclick=async function(){
       var name=nameInput.value.trim();
       var pin=pinInput.value.trim();
-      if(!name || !/^\d{4}$/.test(pin)){ showToast('أدخل الاسم ورمز من 4 أرقام'); return; }
+      if(!name || !/^\d{4}$/.test(pin)){ showToast('Saisissez le nom et un code à 4 chiffres'); return; }
       var teamVal=teamSelect.value;
       var newUser = teamVal==='assistant'
         ? { id:uid(), name:name, role:'assistant', team:null, pin:pin, dailyTarget:null }
         : { id:uid(), name:name, role:'agent', team:teamVal, pin:pin, dailyTarget:null };
       STATE.users.push(newUser);
       await saveUsers();
-      showToast('تمت الإضافة ✓');
+      showToast('Ajouté ✓');
       render();
     };
     addCard.appendChild(addBtn);
@@ -1326,14 +1326,14 @@ function renderAgentsTab(currentUser){
 
   // list all
   var listCard=el('<div class="card"></div>');
-  listCard.appendChild(el('<div class="section-title">جميع أعضاء الفريق</div>'));
+  listCard.appendChild(el('<div class="section-title">Tous les membres de l\'équipe</div>'));
   var all=STATE.users.slice().sort(function(a,b){
     var order={admin:0, assistant:1, agent:2};
     if(order[a.role]!==order[b.role]) return order[a.role]-order[b.role];
     return a.name.localeCompare(b.name,'ar');
   });
   if(all.length===0){
-    listCard.appendChild(el('<div class="faint">لا يوجد أحد بعد</div>'));
+    listCard.appendChild(el('<div class="faint">Personne pour le moment</div>'));
   }
   all.forEach(function(u){
     var item=el('<div class="agent-list-item"></div>');
@@ -1341,18 +1341,18 @@ function renderAgentsTab(currentUser){
     meta.appendChild(el('<div class="aname">'+escapeHtml(u.name)+'</div>'));
     var tagsRow=el('<div class="row" style="margin-top:5px; flex-wrap:wrap;"></div>');
     tagsRow.appendChild(el('<span class="tag role">'+roleLabel(u)+'</span>'));
-    if(u.role==='agent') tagsRow.appendChild(el('<span class="faint" style="font-size:11px;">الهدف اليومي: '+fmtNum(dailyTargetFor(u))+'</span>'));
+    if(u.role==='agent') tagsRow.appendChild(el('<span class="faint" style="font-size:11px;">Objectif quotidien: '+fmtNum(dailyTargetFor(u))+'</span>'));
     meta.appendChild(tagsRow);
     item.appendChild(meta);
     if(isAdmin){
       var btnGroup=el('<div class="row" style="gap:6px;"></div>');
-      var editBtn=el('<button class="btn secondary" style="padding:7px 12px; font-size:12px;">تعديل</button>');
+      var editBtn=el('<button class="btn secondary" style="padding:7px 12px; font-size:12px;">Modifier</button>');
       editBtn.onclick=function(){ STATE.modal={type:'editUser', userId:u.id}; render(); };
       btnGroup.appendChild(editBtn);
       if(u.id!==currentUser.id){
-        var delBtn=el('<button class="btn danger" style="padding:7px 12px; font-size:12px;">حذف</button>');
+        var delBtn=el('<button class="btn danger" style="padding:7px 12px; font-size:12px;">Supprimer</button>');
         delBtn.onclick=async function(){
-          if(!confirm('حذف '+u.name+' من الفريق؟ لن يتم حذف سجلاته السابقة.')) return;
+          if(!confirm('Supprimer '+u.name+' de l\'équipe ? Son historique ne sera pas supprimé.')) return;
           STATE.users=STATE.users.filter(function(x){ return x.id!==u.id; });
           await saveUsers();
           render();
@@ -1387,10 +1387,10 @@ function renderListsTab(){
 
   // ---- import card ----
   var importCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  importCard.appendChild(el('<div class="section-title">استيراد قائمة '+TEAM_LABEL[listType]+' (ملف Excel)</div>'));
+  importCard.appendChild(el('<div class="section-title">Importer une liste — '+TEAM_LABEL[listType]+' (fichier Excel)</div>'));
 
   if(!STATE.importPreview){
-    var dz=el('<div class="dropzone"><div class="icon">📄</div><div>اضغط هنا لاختيار ملف Excel (xlsx/csv)</div><div class="faint" style="margin-top:4px;">يفضّل أن يحتوي على أعمدة: الاسم، رقم الهاتف</div></div>');
+    var dz=el('<div class="dropzone"><div class="icon">📄</div><div>Cliquez ici pour choisir un fichier Excel (xlsx/csv)</div><div class="faint" style="margin-top:4px;">De préférence avec les colonnes: Nom, Téléphone</div></div>');
     var fileInput=document.createElement('input');
     fileInput.type='file'; fileInput.accept='.xlsx,.xls,.csv';
     fileInput.onchange=function(ev){ handleFileImport(ev.target.files[0], listType); };
@@ -1398,10 +1398,10 @@ function renderListsTab(){
     importCard.appendChild(dz);
   } else {
     var prev=STATE.importPreview;
-    importCard.appendChild(el('<div class="faint" style="margin-bottom:8px;">تم العثور على '+prev.rows.length+' صف — تحقق من المعاينة قبل التأكيد</div>'));
+    importCard.appendChild(el('<div class="faint" style="margin-bottom:8px;">'+prev.rows.length+' lignes trouvées — vérifiez l\'aperçu avant de confirmer</div>'));
     var tblWrap=el('<div class="preview-table-wrap"></div>');
     var tbl=document.createElement('table');
-    tbl.innerHTML='<thead><tr><th>الاسم</th><th>الهاتف</th><th>ملاحظة</th></tr></thead>';
+    tbl.innerHTML='<thead><tr><th>Nom</th><th>Téléphone</th><th>Remarque</th></tr></thead>';
     var tbody=document.createElement('tbody');
     prev.rows.slice(0,12).forEach(function(r){
       var tr=document.createElement('tr');
@@ -1411,20 +1411,20 @@ function renderListsTab(){
     tbl.appendChild(tbody);
     tblWrap.appendChild(tbl);
     importCard.appendChild(tblWrap);
-    if(prev.rows.length>12) importCard.appendChild(el('<div class="faint">و '+(prev.rows.length-12)+' صف إضافي...</div>'));
+    if(prev.rows.length>12) importCard.appendChild(el('<div class="faint">et '+(prev.rows.length-12)+' lignes supplémentaires...</div>'));
 
-    var assignField=el('<div class="field" style="margin-top:12px;"><label>تعيين هذه القائمة إلى</label></div>');
+    var assignField=el('<div class="field" style="margin-top:12px;"><label>Assigner cette liste à</label></div>');
     var assignSel=document.createElement('select');
-    assignSel.appendChild(el('<option value="">— بدون تعيين (توزيع لاحقاً) —</option>'));
+    assignSel.appendChild(el('<option value="">— Sans attribution (à répartir plus tard) —</option>'));
     teamAgents(listType).forEach(function(a){
-      var o=document.createElement('option'); o.value=a.id; o.textContent='عامل واحد فقط: '+a.name;
+      var o=document.createElement('option'); o.value=a.id; o.textContent='Un seul agent: '+a.name;
       assignSel.appendChild(o);
     });
     assignField.appendChild(assignSel);
     importCard.appendChild(assignField);
 
     var btnRow=el('<div class="row" style="margin-top:12px;"></div>');
-    var confirmBtn=el('<button class="btn" style="flex:1;">تأكيد الاستيراد ('+prev.rows.length+')</button>');
+    var confirmBtn=el('<button class="btn" style="flex:1;">Confirmer l\'import ('+prev.rows.length+')</button>');
     confirmBtn.onclick=async function(){
       var m=currentMonthKey();
       var directAgent = assignSel.value || null;
@@ -1437,10 +1437,10 @@ function renderListsTab(){
       });
       await saveCalllists();
       STATE.importPreview=null;
-      showToast('تم استيراد '+prev.rows.length+' جهة اتصال ✓');
+      showToast(prev.rows.length+' contacts importés ✓');
       render();
     };
-    var cancelBtn=el('<button class="btn secondary" style="flex:1;">إلغاء</button>');
+    var cancelBtn=el('<button class="btn secondary" style="flex:1;">Annuler</button>');
     cancelBtn.onclick=function(){ STATE.importPreview=null; render(); };
     btnRow.appendChild(confirmBtn); btnRow.appendChild(cancelBtn);
     importCard.appendChild(btnRow);
@@ -1449,20 +1449,20 @@ function renderListsTab(){
 
   // ---- distribution card ----
   var distCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  distCard.appendChild(el('<div class="section-title">توزيع القائمة على '+TEAM_LABEL[listType]+'</div>'));
-  distCard.appendChild(el('<div class="faint" style="margin-bottom:12px;">غير موزّع حالياً: '+unassigned.length+' من أصل '+monthContacts.length+'</div>'));
+  distCard.appendChild(el('<div class="section-title">Répartir la liste — '+TEAM_LABEL[listType]+'</div>'));
+  distCard.appendChild(el('<div class="faint" style="margin-bottom:12px;">Non attribués actuellement: '+unassigned.length+' sur '+monthContacts.length+'</div>'));
 
   var agentsInTeam=teamAgents(listType);
   if(agentsInTeam.length===0){
-    distCard.appendChild(el('<div class="faint">لا يوجد عمال مضافين في '+TEAM_LABEL[listType]+' بعد</div>'));
+    distCard.appendChild(el('<div class="faint">Aucun agent ajouté dans '+TEAM_LABEL[listType]+' pour le moment</div>'));
   } else {
     agentsInTeam.forEach(function(a){
       var cnt=STATE.calllists.filter(function(c){ return c.assignedTo===a.id && c.month===currentMonthKey() && c.listType===listType; }).length;
       var pend=STATE.calllists.filter(function(c){ return c.assignedTo===a.id && c.month===currentMonthKey() && c.listType===listType && c.status==='pending'; }).length;
-      distCard.appendChild(el('<div class="agent-list-item"><div class="meta"><div class="aname">'+escapeHtml(a.name)+'</div><div class="faint" style="font-size:11.5px;">'+pend+' متبقية من '+cnt+'</div></div></div>'));
+      distCard.appendChild(el('<div class="agent-list-item"><div class="meta"><div class="aname">'+escapeHtml(a.name)+'</div><div class="faint" style="font-size:11.5px;">'+pend+' restants sur '+cnt+'</div></div></div>'));
     });
     if(unassigned.length>0){
-      var distBtn=el('<button class="btn block" style="margin-top:8px;">توزيع تلقائي بالتساوي ('+unassigned.length+')</button>');
+      var distBtn=el('<button class="btn block" style="margin-top:8px;">Répartition automatique équitable ('+unassigned.length+')</button>');
       distBtn.onclick=async function(){
         var idx=0;
         unassigned.forEach(function(c){
@@ -1470,7 +1470,7 @@ function renderListsTab(){
           idx++;
         });
         await saveCalllists();
-        showToast('تم التوزيع ✓');
+        showToast('Répartition effectuée ✓');
         render();
       };
       distCard.appendChild(distBtn);
@@ -1481,15 +1481,15 @@ function renderListsTab(){
   // ---- delete whole batch ----
   if(monthContacts.length>0){
     var delBatchCard=el('<div class="card" style="margin-bottom:14px; border-color:var(--danger);"></div>');
-    delBatchCard.appendChild(el('<div class="section-title">حذف القائمة بالكامل</div>'));
-    delBatchCard.appendChild(el('<div class="faint" style="margin-bottom:10px;">يحذف جميع جهات الاتصال المستوردة لـ'+TEAM_LABEL[listType]+' هذا الشهر ('+monthContacts.length+') نهائياً — لا يمكن التراجع.</div>'));
-    var delBatchBtn=el('<button class="btn danger block">حذف القائمة بالكامل ('+monthContacts.length+')</button>');
+    delBatchCard.appendChild(el('<div class="section-title">Supprimer toute la liste</div>'));
+    delBatchCard.appendChild(el('<div class="faint" style="margin-bottom:10px;">Supprime définitivement tous les contacts importés pour '+TEAM_LABEL[listType]+' ce mois-ci ('+monthContacts.length+') — action irréversible.</div>'));
+    var delBatchBtn=el('<button class="btn danger block">Supprimer toute la liste ('+monthContacts.length+')</button>');
     delBatchBtn.onclick=async function(){
-      if(!confirm('حذف كل جهات اتصال '+TEAM_LABEL[listType]+' لهذا الشهر نهائياً؟ هذا لا يمكن التراجع عنه.')) return;
+      if(!confirm('Supprimer définitivement tous les contacts de '+TEAM_LABEL[listType]+' pour ce mois-ci ? Cette action est irréversible.')) return;
       var idsToRemove = monthContacts.map(function(c){ return c.id; });
       STATE.calllists = STATE.calllists.filter(function(c){ return idsToRemove.indexOf(c.id)===-1; });
       await saveCalllists();
-      showToast('تم حذف القائمة ✓');
+      showToast('Liste supprimée ✓');
       render();
     };
     delBatchCard.appendChild(delBatchBtn);
@@ -1501,30 +1501,30 @@ function renderListsTab(){
   if(retryList.length>0){
     var retryCard=el('<div class="card" style="margin-bottom:14px; border-color:var(--accent);"></div>');
     retryCard.appendChild(el(
-      '<div class="section-title">جاهزون لإعادة الاتصال ('+retryList.length+')</div>'+
-      '<div class="faint" style="margin-bottom:10px;">جهات اتصال مرّ عليها '+RETRY_AFTER_DAYS+' يوماً على الأقل وسبب عدم نجاحها مؤقت '+
-      '(نسي كلمة السر / رصيد غير كافٍ / مشكلة تقنية / لا يرد) — يُحتمل أنها تغيّرت الآن.</div>'
+      '<div class="section-title">Prêts pour rappel ('+retryList.length+')</div>'+
+      '<div class="faint" style="margin-bottom:10px;">Contacts pour lesquels au moins '+RETRY_AFTER_DAYS+' jours se sont écoulés et dont le motif d\'échec est temporaire '+
+      '(mot de passe oublié / solde insuffisant / problème technique / injoignable) — leur situation a peut-être changé.</div>'
     ));
     var retryPreview=el('<div class="preview-table-wrap" style="max-height:180px;"></div>');
     var rtbl=document.createElement('table');
-    rtbl.innerHTML='<thead><tr><th>الاسم</th><th>السبب السابق</th><th>منذ</th></tr></thead>';
+    rtbl.innerHTML='<thead><tr><th>Nom</th><th>Motif précédent</th><th>Depuis</th></tr></thead>';
     var rtbody=document.createElement('tbody');
     retryList.slice(0,20).forEach(function(c){
       var tr=document.createElement('tr');
-      tr.innerHTML='<td>'+escapeHtml(c.name||'—')+'</td><td>'+escapeHtml(c.reason||'')+'</td><td>'+daysSince(c.actionDate)+' يوماً</td>';
+      tr.innerHTML='<td>'+escapeHtml(c.name||'—')+'</td><td>'+escapeHtml(frReason(c.reason))+'</td><td>'+daysSince(c.actionDate)+' jours</td>';
       rtbody.appendChild(tr);
     });
     rtbl.appendChild(rtbody);
     retryPreview.appendChild(rtbl);
     retryCard.appendChild(retryPreview);
-    var retryBtn=el('<button class="btn block" style="margin-top:10px;">إعادتهم لقائمة الانتظار ('+retryList.length+')</button>');
+    var retryBtn=el('<button class="btn block" style="margin-top:10px;">Remettre en attente ('+retryList.length+')</button>');
     retryBtn.onclick=async function(){
       retryList.forEach(function(c){
         c.lastAttempt = { reason:c.reason, actionDate:c.actionDate };
         c.status='pending'; c.reason=null; c.actionDate=null; c.actionAt=null; c.callDurationSeconds=null; c.autoTimed=null;
       });
       await saveCalllists();
-      showToast('تمت إعادتهم لقائمة الانتظار ✓');
+      showToast('Remis en attente ✓');
       render();
     };
     retryCard.appendChild(retryBtn);
@@ -1535,50 +1535,50 @@ function renderListsTab(){
   if(monthContacts.length>0){
     var browseCard=el('<div class="card"></div>');
     browseCard.appendChild(el(
-      '<div class="section-title">كل جهات الاتصال — '+arabicMonthLabel(currentMonthKey())+' ('+monthContacts.length+')</div>'+
-      '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">اضغط "تحقّق" بعد الاتصال بالزبون بنفسك للتأكد أن العامل تواصل معه فعلاً — للتدقيق العشوائي</div>'
+      '<div class="section-title">Tous les contacts — '+arabicMonthLabel(currentMonthKey())+' ('+monthContacts.length+')</div>'+
+      '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">Cliquez sur « Vérifier » après avoir appelé le client vous-même pour confirmer le contact — pour un contrôle aléatoire</div>'
     ));
     var btbl=document.createElement('table');
-    btbl.innerHTML='<thead><tr><th>الاسم</th><th>مسندة إلى</th><th>الحالة</th><th>المدة</th><th>تحقّق الإدارة</th><th></th></tr></thead>';
+    btbl.innerHTML='<thead><tr><th>Nom</th><th>Assigné à</th><th>Statut</th><th>Durée</th><th>Vérification</th><th></th></tr></thead>';
     var btbody=document.createElement('tbody');
     monthContacts.forEach(function(c){
       var tr=document.createElement('tr');
       var tdName=document.createElement('td');
       var nameInput=document.createElement('input');
       nameInput.value=c.name||''; nameInput.style.fontSize='12.5px'; nameInput.style.padding='6px 8px'; nameInput.style.minWidth='110px';
-      nameInput.onchange=async function(){ c.name=nameInput.value.trim(); await saveCalllists(); showToast('تم التحديث'); };
+      nameInput.onchange=async function(){ c.name=nameInput.value.trim(); await saveCalllists(); showToast('Mis à jour'); };
       tdName.appendChild(nameInput);
       var tdAssign=document.createElement('td');
       var sel=document.createElement('select');
       sel.style.fontSize='12px'; sel.style.padding='6px 8px';
-      sel.appendChild(el('<option value="">— غير موزّع —</option>'));
+      sel.appendChild(el('<option value="">— Non attribué —</option>'));
       agentsInTeam.forEach(function(a){
         var o=document.createElement('option'); o.value=a.id; o.textContent=a.name;
         if(c.assignedTo===a.id) o.selected=true;
         sel.appendChild(o);
       });
-      sel.onchange=async function(){ c.assignedTo = sel.value || null; await saveCalllists(); showToast('تم التحديث'); };
+      sel.onchange=async function(){ c.assignedTo = sel.value || null; await saveCalllists(); showToast('Mis à jour'); };
       tdAssign.appendChild(sel);
       var tdStatus=document.createElement('td');
       var pillClass = c.status==='pending'?'pending':(c.status==='success'?'success':'failed');
-      var pillLabel = c.status==='pending'?'قيد الانتظار':(c.status==='success'?'نجاح':'فشل');
+      var pillLabel = c.status==='pending'?RL.pendingStatus:(c.status==='success'?RL.success:RL.failed);
       tdStatus.innerHTML='<span class="status-pill '+pillClass+'">'+pillLabel+'</span>';
       var tdDur=document.createElement('td');
-      tdDur.innerHTML = c.callDurationSeconds!=null ? (fmtDuration(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠</span>':'')) : '—';
+      tdDur.innerHTML = c.callDurationSeconds!=null ? (fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠</span>':'')) : '—';
       var tdVerify=document.createElement('td');
       if(c.status==='pending'){ tdVerify.innerHTML='—'; }
       else {
-        var vBtn=el('<button class="btn '+(c.verified?'secondary':'ghost')+'" style="padding:5px 10px; font-size:11px;">'+(c.verified?'✓ تم التحقق':'تحقّق')+'</button>');
+        var vBtn=el('<button class="btn '+(c.verified?'secondary':'ghost')+'" style="padding:5px 10px; font-size:11px;">'+(c.verified?'✓ Vérifié':'Vérifier')+'</button>');
         vBtn.onclick=async function(){ c.verified=!c.verified; await saveCalllists(); render(); };
         tdVerify.appendChild(vBtn);
       }
       var tdDel=document.createElement('td');
-      var delRowBtn=el('<button class="btn danger" style="padding:5px 9px; font-size:11px;">حذف</button>');
+      var delRowBtn=el('<button class="btn danger" style="padding:5px 9px; font-size:11px;">Supprimer</button>');
       delRowBtn.onclick=async function(){
-        if(!confirm('حذف '+(c.name||'هذه الجهة')+' نهائياً؟')) return;
+        if(!confirm('Supprimer '+(c.name||'ce contact')+' définitivement ?')) return;
         STATE.calllists = STATE.calllists.filter(function(x){ return x.id!==c.id; });
         await saveCalllists();
-        showToast('تم الحذف ✓');
+        showToast('Supprimé ✓');
         render();
       };
       tdDel.appendChild(delRowBtn);
@@ -1597,7 +1597,7 @@ function renderListsTab(){
 
 function handleFileImport(file, listType){
   if(!file) return;
-  if(typeof XLSX === 'undefined'){ showToast('تعذر تحميل أداة قراءة Excel، تحقق من الاتصال بالإنترنت'); return; }
+  if(typeof XLSX === 'undefined'){ showToast('Impossible de charger l\'outil Excel, vérifiez la connexion internet'); return; }
   var reader=new FileReader();
   reader.onload=function(e){
     try{
@@ -1605,7 +1605,7 @@ function handleFileImport(file, listType){
       var workbook=XLSX.read(data, {type:'array'});
       var sheet=workbook.Sheets[workbook.SheetNames[0]];
       var raw=XLSX.utils.sheet_to_json(sheet, {defval:''});
-      if(!raw.length){ showToast('الملف فارغ أو غير مقروء'); return; }
+      if(!raw.length){ showToast('Le fichier est vide ou illisible'); return; }
 
       var keys=Object.keys(raw[0]);
       function findKey(patterns){
@@ -1623,14 +1623,14 @@ function handleFileImport(file, listType){
           name: nameKey ? String(r[nameKey]).trim() : String(r[keys[0]]||'').trim(),
           phone: phoneKey ? String(r[phoneKey]).trim() : (keys[1] ? String(r[keys[1]]||'').trim() : ''),
           accountNo: accKey ? String(r[accKey]).trim() : '',
-          note: (!nameKey || !phoneKey) ? 'تم التخمين تلقائياً — تحقق من الأعمدة' : ''
+          note: (!nameKey || !phoneKey) ? 'Détecté automatiquement — vérifiez les colonnes' : ''
         };
       }).filter(function(r){ return r.name || r.phone; });
 
       STATE.importPreview = { listType:listType, rows:rows };
       render();
     }catch(err){
-      showToast('تعذرت قراءة الملف — تأكد أنه Excel صالح');
+      showToast('Impossible de lire le fichier — vérifiez qu\'il s\'agit d\'un Excel valide');
     }
   };
   reader.readAsArrayBuffer(file);
@@ -1653,15 +1653,15 @@ function frStatus(status){ return status==='success'?RL.success : status==='fail
 function renderReportsTab(){
   var wrap=el('<div></div>');
   var modes=[
-    {k:'summary', l:'ملخص الفريق (شهري)'},
-    {k:'daily', l:'تقرير يومي'},
-    {k:'weekly', l:'تقرير أسبوعي'},
-    {k:'range', l:'فترة مخصصة'},
-    {k:'individual', l:'تقرير فردي'},
-    {k:'failed', l:'المكالمات الفاشلة فقط'}
+    {k:'summary', l:'Résumé de l\'équipe (mensuel)'},
+    {k:'daily', l:'Rapport journalier'},
+    {k:'weekly', l:'Rapport hebdomadaire'},
+    {k:'range', l:'Période personnalisée'},
+    {k:'individual', l:'Rapport individuel'},
+    {k:'failed', l:'Appels échoués uniquement'}
   ];
   var pickerCard=el('<div class="card" style="margin-bottom:14px; background:var(--surface-3);"></div>');
-  pickerCard.appendChild(el('<div class="section-title" style="margin-bottom:8px;">نوع التقرير</div>'));
+  pickerCard.appendChild(el('<div class="section-title" style="margin-bottom:8px;">Type de rapport</div>'));
   var modeSel=document.createElement('select');
   modes.forEach(function(m){
     var o=document.createElement('option'); o.value=m.k; o.textContent=m.l;
@@ -1718,7 +1718,7 @@ function renderSummaryReport(){
   var months=[]; var d=new Date();
   for(var i=0;i<6;i++){ var m=new Date(d.getFullYear(), d.getMonth()-i,1); months.push(m.getFullYear()+'-'+String(m.getMonth()+1).padStart(2,'0')); }
   var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  pickCard.appendChild(el('<div class="section-title">اختر الشهر</div>'));
+  pickCard.appendChild(el('<div class="section-title">Choisir le mois</div>'));
   var sel=document.createElement('select');
   months.forEach(function(m){ var o=document.createElement('option'); o.value=m; o.textContent=arabicMonthLabel(m); sel.appendChild(o); });
   sel.value = STATE._reportMonth || currentMonthKey();
@@ -1817,7 +1817,7 @@ function renderSummaryReport(){
 function renderDailyReport(){
   var container=el('<div></div>');
   var dateCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  dateCard.appendChild(el('<div class="section-title">اختر اليوم</div>'));
+  dateCard.appendChild(el('<div class="section-title">Choisir le jour</div>'));
   var dateInput=document.createElement('input');
   dateInput.type='date'; dateInput.value = STATE.reportDate || todayStr();
   dateInput.onchange=function(){ STATE.reportDate=dateInput.value; render(); };
@@ -1832,7 +1832,7 @@ function renderDailyReport(){
 function renderWeeklyReport(){
   var container=el('<div></div>');
   var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  pickCard.appendChild(el('<div class="section-title">اختر أي يوم من الأسبوع المطلوب</div>'));
+  pickCard.appendChild(el('<div class="section-title">Choisir un jour de la semaine souhaitée</div>'));
   var dateInput=document.createElement('input');
   dateInput.type='date'; dateInput.value = STATE.reportWeekAnchor || todayStr();
   dateInput.onchange=function(){ STATE.reportWeekAnchor=dateInput.value; render(); };
@@ -1850,21 +1850,21 @@ function renderWeeklyReport(){
 function renderCustomRangeReport(){
   var container=el('<div></div>');
   var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  pickCard.appendChild(el('<div class="section-title">اختر الفترة</div>'));
+  pickCard.appendChild(el('<div class="section-title">Choisir la période</div>'));
   var startInput=document.createElement('input'); startInput.type='date';
   startInput.value = STATE.reportRangeStart || todayStr();
   startInput.onchange=function(){ STATE.reportRangeStart=startInput.value; render(); };
   var endInput=document.createElement('input'); endInput.type='date';
   endInput.value = STATE.reportRangeEnd || todayStr();
   endInput.onchange=function(){ STATE.reportRangeEnd=endInput.value; render(); };
-  var f1=el('<div class="field"><label>من تاريخ</label></div>'); f1.appendChild(startInput);
-  var f2=el('<div class="field"><label>إلى تاريخ</label></div>'); f2.appendChild(endInput);
+  var f1=el('<div class="field"><label>Date de début</label></div>'); f1.appendChild(startInput);
+  var f2=el('<div class="field"><label>Date de fin</label></div>'); f2.appendChild(endInput);
   pickCard.appendChild(f1); pickCard.appendChild(f2);
   container.appendChild(pickCard);
 
   var start = STATE.reportRangeStart || todayStr();
   var end = STATE.reportRangeEnd || todayStr();
-  if(start>end){ container.appendChild(el('<div class="error-msg">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</div>')); return container; }
+  if(start>end){ container.appendChild(el('<div class="error-msg">La date de début doit précéder la date de fin</div>')); return container; }
   container.appendChild(renderRangeReportBody(start, end, RL.rangeTitle+' — '+start+' → '+end, 'periode-'+start+'-'+end));
   return container;
 }
@@ -1872,21 +1872,21 @@ function renderCustomRangeReport(){
 function renderFailedCallsReport(){
   var container=el('<div></div>');
   var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  pickCard.appendChild(el('<div class="section-title">اختر الفترة</div>'));
+  pickCard.appendChild(el('<div class="section-title">Choisir la période</div>'));
   var startInput=document.createElement('input'); startInput.type='date';
   startInput.value = STATE.failedReportStart || (currentMonthKey()+'-01');
   startInput.onchange=function(){ STATE.failedReportStart=startInput.value; render(); };
   var endInput=document.createElement('input'); endInput.type='date';
   endInput.value = STATE.failedReportEnd || todayStr();
   endInput.onchange=function(){ STATE.failedReportEnd=endInput.value; render(); };
-  var f1=el('<div class="field"><label>من تاريخ</label></div>'); f1.appendChild(startInput);
-  var f2=el('<div class="field"><label>إلى تاريخ</label></div>'); f2.appendChild(endInput);
+  var f1=el('<div class="field"><label>Date de début</label></div>'); f1.appendChild(startInput);
+  var f2=el('<div class="field"><label>Date de fin</label></div>'); f2.appendChild(endInput);
   pickCard.appendChild(f1); pickCard.appendChild(f2);
   container.appendChild(pickCard);
 
   var start = STATE.failedReportStart || (currentMonthKey()+'-01');
   var end = STATE.failedReportEnd || todayStr();
-  if(start>end){ container.appendChild(el('<div class="error-msg">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</div>')); return container; }
+  if(start>end){ container.appendChild(el('<div class="error-msg">La date de début doit précéder la date de fin</div>')); return container; }
 
   var failedContacts = contactsInRange(start, end, null).filter(function(c){ return c.status==='failed'; });
   var reasonMap = {};
@@ -2114,9 +2114,9 @@ function renderIndividualReport(){
   var container=el('<div></div>');
   var agents=agentsOnly();
   var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
-  pickCard.appendChild(el('<div class="section-title">اختر العامل والفترة</div>'));
+  pickCard.appendChild(el('<div class="section-title">Choisir l\'agent et la période</div>'));
   var agentSel=document.createElement('select');
-  agentSel.appendChild(el('<option value="">— اختر عاملاً —</option>'));
+  agentSel.appendChild(el('<option value="">— Choisir un agent —</option>'));
   agents.slice().sort(function(a,b){ return a.name.localeCompare(b.name,'ar'); }).forEach(function(a){
     var o=document.createElement('option'); o.value=a.id; o.textContent=a.name+' ('+TEAM_LABEL[a.team]+')';
     if(STATE.reportAgentId===a.id) o.selected=true;
@@ -2126,7 +2126,7 @@ function renderIndividualReport(){
   var f1=el('<div class="field"></div>'); f1.appendChild(agentSel); pickCard.appendChild(f1);
 
   var periodSel=document.createElement('select');
-  periodSel.innerHTML='<option value="month">تقرير شهري</option><option value="day">تقرير يومي</option><option value="range">فترة مخصصة</option>';
+  periodSel.innerHTML='<option value="month">Rapport mensuel</option><option value="day">Rapport journalier</option><option value="range">Période personnalisée</option>';
   periodSel.value=STATE.reportPeriodType;
   periodSel.onchange=function(){ STATE.reportPeriodType=periodSel.value; render(); };
   var f2=el('<div class="field"></div>'); f2.appendChild(periodSel); pickCard.appendChild(f2);
@@ -2140,8 +2140,8 @@ function renderIndividualReport(){
     sIn.onchange=function(){ STATE.reportRangeStart=sIn.value; render(); };
     var eIn=document.createElement('input'); eIn.type='date'; eIn.value=STATE.reportRangeEnd||todayStr();
     eIn.onchange=function(){ STATE.reportRangeEnd=eIn.value; render(); };
-    var rf1=el('<div class="field"><label>من تاريخ</label></div>'); rf1.appendChild(sIn);
-    var rf2=el('<div class="field"><label>إلى تاريخ</label></div>'); rf2.appendChild(eIn);
+    var rf1=el('<div class="field"><label>Date de début</label></div>'); rf1.appendChild(sIn);
+    var rf2=el('<div class="field"><label>Date de fin</label></div>'); rf2.appendChild(eIn);
     pickCard.appendChild(rf1); pickCard.appendChild(rf2);
   } else {
     var mIn=document.createElement('input'); mIn.type='month'; mIn.value=STATE._reportMonth||currentMonthKey();
@@ -2151,11 +2151,11 @@ function renderIndividualReport(){
   container.appendChild(pickCard);
 
   if(!STATE.reportAgentId){
-    container.appendChild(el('<div class="empty-state"><div class="icon">👤</div><div>اختر عاملاً لعرض تقريره المفصل</div></div>'));
+    container.appendChild(el('<div class="empty-state"><div class="icon">👤</div><div>Choisissez un agent pour voir son rapport détaillé</div></div>'));
     return container;
   }
   var agent=getUser(STATE.reportAgentId);
-  if(!agent){ container.appendChild(el('<div class="faint">هذا العامل لم يعد موجوداً</div>')); return container; }
+  if(!agent){ container.appendChild(el('<div class="faint">Cet agent n\'existe plus</div>')); return container; }
 
   var contacts, periodLabelFr, manualEntries, startDate, endDate;
   if(STATE.reportPeriodType==='day'){
@@ -2166,7 +2166,7 @@ function renderIndividualReport(){
     manualEntries=STATE.entries.filter(function(e){ return e.userId===agent.id && e.date===date && e.count>0; });
   } else if(STATE.reportPeriodType==='range'){
     startDate=STATE.reportRangeStart||todayStr(); endDate=STATE.reportRangeEnd||todayStr();
-    if(startDate>endDate){ container.appendChild(el('<div class="error-msg">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</div>')); return container; }
+    if(startDate>endDate){ container.appendChild(el('<div class="error-msg">La date de début doit précéder la date de fin</div>')); return container; }
     contacts=contactsInRange(startDate, endDate, agent.id);
     periodLabelFr=startDate+' → '+endDate;
     manualEntries=manualEntriesInRange(startDate, endDate, agent.id);
@@ -2269,14 +2269,14 @@ function renderIndividualReport(){
 }
 
 function arabicMonthLabel(ym){
-  var names=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  var names=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
   var parts=ym.split('-');
   return names[parseInt(parts[1])-1]+' '+parts[0];
 }
 
 function renderSettingsTab(){
   var wrap=el('<div class="card"></div>');
-  wrap.appendChild(el('<div class="section-title">إعدادات الأهداف</div>'));
+  wrap.appendChild(el('<div class="section-title">Paramètres des objectifs</div>'));
 
   function numField(labelText, value, onSave){
     var f=el('<div class="field"></div>');
@@ -2297,15 +2297,15 @@ function renderSettingsTab(){
     return f;
   }
 
-  wrap.appendChild(numField('الهدف اليومي — فريق التفعيل (لكل عامل)', STATE.settings.dailyTargetActivation, async function(v){ STATE.settings.dailyTargetActivation=v; await saveSettings(); showToast('تم التحديث'); }));
-  wrap.appendChild(numField('الهدف اليومي — فريق الاستخدام (لكل عامل)', STATE.settings.dailyTargetUsage, async function(v){ STATE.settings.dailyTargetUsage=v; await saveSettings(); showToast('تم التحديث'); }));
-  wrap.appendChild(numField('الهدف الشهري — فريق التفعيل (كامل الفريق)', STATE.settings.monthlyTargetTeamActivation, async function(v){ STATE.settings.monthlyTargetTeamActivation=v; await saveSettings(); showToast('تم التحديث'); }));
-  wrap.appendChild(numField('الهدف الشهري — فريق الاستخدام (كامل الفريق)', STATE.settings.monthlyTargetTeamUsage, async function(v){ STATE.settings.monthlyTargetTeamUsage=v; await saveSettings(); showToast('تم التحديث'); }));
+  wrap.appendChild(numField('Objectif quotidien — Groupe non valide (par agent)', STATE.settings.dailyTargetActivation, async function(v){ STATE.settings.dailyTargetActivation=v; await saveSettings(); showToast('Mis à jour'); }));
+  wrap.appendChild(numField('Objectif quotidien — Groupe inactif (par agent)', STATE.settings.dailyTargetUsage, async function(v){ STATE.settings.dailyTargetUsage=v; await saveSettings(); showToast('Mis à jour'); }));
+  wrap.appendChild(numField('Objectif mensuel — Groupe non valide (équipe entière)', STATE.settings.monthlyTargetTeamActivation, async function(v){ STATE.settings.monthlyTargetTeamActivation=v; await saveSettings(); showToast('Mis à jour'); }));
+  wrap.appendChild(numField('Objectif mensuel — Groupe inactif (équipe entière)', STATE.settings.monthlyTargetTeamUsage, async function(v){ STATE.settings.monthlyTargetTeamUsage=v; await saveSettings(); showToast('Mis à jour'); }));
   wrap.appendChild(el('<hr class="rule">'));
-  wrap.appendChild(textField('اسم مدير السداد (يظهر في توقيع التقارير المطبوعة)', STATE.settings.directorName, async function(v){ STATE.settings.directorName=v; await saveSettings(); showToast('تم التحديث'); }));
+  wrap.appendChild(textField('Nom du directeur SEDAD (apparaît dans la signature des rapports imprimés)', STATE.settings.directorName, async function(v){ STATE.settings.directorName=v; await saveSettings(); showToast('Mis à jour'); }));
 
   wrap.appendChild(el('<hr class="rule">'));
-  wrap.appendChild(el('<div class="faint" style="font-size:12px;">ملاحظة: هذه البيانات مشتركة بين جميع من يفتح هذا التطبيق ويسجل الدخول. يمكن لكل عامل تعديل هدفه الفردي من تبويب «الفريق» إذا احتجت هدفاً مختلفاً عن الافتراضي.</div>'));
+  wrap.appendChild(el('<div class="faint" style="font-size:12px;">Remarque : ces données sont partagées entre toutes les personnes qui ouvrent cette application et se connectent. Vous pouvez modifier l\'objectif individuel de chaque agent depuis l\'onglet « Équipe » si besoin.</div>'));
 
   return wrap;
 }
