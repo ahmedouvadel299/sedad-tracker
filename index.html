@@ -298,6 +298,8 @@ var STATE = {
   reportWeekAnchor:null,   // any date within the target week
   reportRangeStart:null,
   reportRangeEnd:null,
+  failedReportStart:null,
+  failedReportEnd:null,
   importPreview:null,  // {listType, rows:[{name,phone,accountNo}]}
   modal:null,           // {type:'action', contactId, actionType} | {type:'editUser', userId}
   callStarts:{},        // contactId -> Date.now() when the in-app call button was pressed (not persisted)
@@ -497,6 +499,46 @@ function combinedMonthTotal(userId, month){
 }
 function teamMonthTotal(team, month){
   return teamAgents(team).reduce(function(s,a){ return s + combinedMonthTotal(a.id, month); }, 0);
+}
+function teamSuccessRateMonth(team, month){
+  var contacts=[];
+  teamAgents(team).forEach(function(a){ contacts=contacts.concat(contactsForAgentMonth(a.id, month)); });
+  var success=contacts.filter(function(c){ return c.status==='success'; }).length;
+  var failed=contacts.filter(function(c){ return c.status==='failed'; }).length;
+  var total=success+failed;
+  return total>0 ? Math.round((success/total)*100) : null;
+}
+function agentWeekRating(user){
+  var monday=mondayOf(todayStr());
+  var sunday=addDaysStr(monday,6);
+  var target=dailyTargetFor(user);
+  var weeklyTarget=target*6;
+  var achieved=combinedRangeTotal(user.id, monday, sunday);
+  var pctAchieved = weeklyTarget>0 ? Math.min(1, achieved/weeklyTarget) : 0;
+  var contacts=contactsInRange(monday, sunday, user.id);
+  var success=contacts.filter(function(c){ return c.status==='success'; }).length;
+  var failed=contacts.filter(function(c){ return c.status==='failed'; }).length;
+  var successRate = (success+failed)>0 ? success/(success+failed) : null;
+  var scoreForRate = successRate!=null ? successRate : pctAchieved;
+  var combined = (pctAchieved*0.6) + (scoreForRate*0.4);
+  var stars = Math.max(1, Math.min(5, Math.round(combined*5) || 1));
+  return { stars:stars, achieved:achieved, weeklyTarget:weeklyTarget, successRate:successRate };
+}
+function hourlySuccessStats(){
+  var buckets={};
+  STATE.calllists.forEach(function(c){
+    if(c.status!=='success' && c.status!=='failed') return;
+    if(!c.actionAt) return;
+    var h=new Date(c.actionAt).getHours();
+    if(!buckets[h]) buckets[h]={success:0, failed:0};
+    if(c.status==='success') buckets[h].success++; else buckets[h].failed++;
+  });
+  var arr=Object.keys(buckets).map(function(h){
+    var b=buckets[h]; var total=b.success+b.failed;
+    return {hour:parseInt(h), total:total, rate: total>0?Math.round((b.success/total)*100):0};
+  }).filter(function(x){ return x.total>=3; });
+  arr.sort(function(a,b){ return b.rate-a.rate; });
+  return arr;
 }
 function teamTodayTotal(team){
   return teamAgents(team).reduce(function(s,a){ return s + combinedToday(a.id); }, 0);
@@ -1036,29 +1078,19 @@ function renderAgentView(user){
   if(fromList>0){
     counterCard.appendChild(el('<div class="faint" style="font-size:12px; margin-top:-6px;">منها '+fmtNum(fromList)+' من «قائمتي» تلقائياً</div>'));
   }
-
-  counterCard.appendChild(el('<div class="section-title" style="margin-top:18px; text-align:center;">إضافة يدوية (عمليات خارج القائمة)</div>'));
-  var te=todayEntry(user.id);
-  var manualCount = te?te.count:0;
-  var stepper=el('<div class="stepper"></div>');
-  var minusBtn=el('<button>−</button>');
-  var input=document.createElement('input');
-  input.type='number'; input.inputMode='numeric'; input.value=manualCount;
-  var plusBtn=el('<button>+</button>');
-  minusBtn.onclick=function(){ input.value=Math.max(0, (parseInt(input.value)||0)-1); };
-  plusBtn.onclick=function(){ input.value=(parseInt(input.value)||0)+1; };
-  stepper.appendChild(minusBtn); stepper.appendChild(input); stepper.appendChild(plusBtn);
-  counterCard.appendChild(stepper);
-
-  var saveBtn=el('<button class="btn block">حفظ</button>');
-  saveBtn.onclick=async function(){
-    var val=Math.max(0, parseInt(input.value)||0);
-    await recordEntry(user.id, val);
-    showToast('تم الحفظ ✓');
-    render();
-  };
-  counterCard.appendChild(saveBtn);
   wrap.appendChild(counterCard);
+
+  var rating = agentWeekRating(user);
+  var starsStr = '★'.repeat(rating.stars) + '☆'.repeat(5-rating.stars);
+  var ratingCard=el(
+    '<div class="card" style="margin-top:14px; text-align:center; padding:16px;">'+
+    '<div class="faint" style="font-size:11.5px; margin-bottom:6px;">تقييم هذا الأسبوع</div>'+
+    '<div style="font-size:26px; color:var(--accent); letter-spacing:2px;">'+starsStr+'</div>'+
+    '<div class="faint" style="font-size:11px; margin-top:6px;">'+fmtNum(rating.achieved)+' من '+fmtNum(rating.weeklyTarget)+' هذا الأسبوع'+
+    (rating.successRate!=null ? (' — معدل النجاح '+Math.round(rating.successRate*100)+'%') : '')+'</div>'+
+    '</div>'
+  );
+  wrap.appendChild(ratingCard);
 
   // monthly stat row
   var mTotal=combinedMonthTotal(user.id);
@@ -1116,6 +1148,11 @@ function contactRow(c, readOnly){
   var meta=el('<div class="cmeta"></div>');
   meta.appendChild(el('<div class="cname">'+escapeHtml(c.name||'بدون اسم')+'</div>'));
   if(c.phone) meta.appendChild(el('<div class="cphone">'+escapeHtml(c.phone)+'</div>'));
+  if(!readOnly && c.lastAttempt && c.lastAttempt.actionDate){
+    meta.appendChild(el(
+      '<div class="faint" style="font-size:11px; margin-top:3px; color:var(--accent);">↻ آخر محاولة: قبل '+daysSince(c.lastAttempt.actionDate)+' يوماً — '+escapeHtml(frReason(c.lastAttempt.reason)||c.lastAttempt.reason||'')+'</div>'
+    ));
+  }
   if(readOnly){
     var pillClass = c.status==='success' ? 'success' : 'failed';
     var pillLabel = c.status==='success' ? 'نجاح' : ('فشل — '+(c.reason||''));
@@ -1200,6 +1237,28 @@ function renderOverviewTab(){
   statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamActivation)+'</span></div><div class="lbl">تفعيل — هذا الشهر</div></div>'));
   statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamUsage)+'</span></div><div class="lbl">استخدام — هذا الشهر</div></div>'));
   wrap.appendChild(statGrid);
+
+  var month = currentMonthKey();
+  var actRate = teamSuccessRateMonth('تفعيل', month), useRate = teamSuccessRateMonth('استخدام', month);
+  var rateGrid=el('<div class="stat-grid" style="margin-top:0;"></div>');
+  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+(actRate!=null?actRate+'%':'—')+'</div><div class="lbl">معدل النجاح — تفعيل</div></div>'));
+  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+(useRate!=null?useRate+'%':'—')+'</div><div class="lbl">معدل النجاح — استخدام</div></div>'));
+  wrap.appendChild(rateGrid);
+
+  var hourlyStats = hourlySuccessStats();
+  if(hourlyStats.length>0){
+    var hourCard=el('<div class="card" style="margin-top:14px;"></div>');
+    hourCard.appendChild(el('<div class="section-title">أفضل أوقات الاتصال (حسب معدل النجاح)</div>'));
+    hourlyStats.slice(0,3).forEach(function(h){
+      var row=el('<div class="reason-bar-row"></div>');
+      row.appendChild(el('<div class="rlabel">الساعة '+String(h.hour).padStart(2,'0')+':00</div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+h.rate+'%; background:#5AA57C;"></div></div>'));
+      row.appendChild(el('<div class="rcount">'+h.rate+'%</div>'));
+      hourCard.appendChild(row);
+    });
+    hourCard.appendChild(el('<div class="faint" style="font-size:11px; margin-top:8px;">مبني على المكالمات المسجّلة تلقائياً (زر 📞) بعدد كافٍ من العينات لكل ساعة</div>'));
+    wrap.appendChild(hourCard);
+  }
 
   [
     {team:'تفعيل', agents:actAgents, color:'#5AA57C'},
@@ -1354,15 +1413,26 @@ function renderListsTab(){
     importCard.appendChild(tblWrap);
     if(prev.rows.length>12) importCard.appendChild(el('<div class="faint">و '+(prev.rows.length-12)+' صف إضافي...</div>'));
 
+    var assignField=el('<div class="field" style="margin-top:12px;"><label>تعيين هذه القائمة إلى</label></div>');
+    var assignSel=document.createElement('select');
+    assignSel.appendChild(el('<option value="">— بدون تعيين (توزيع لاحقاً) —</option>'));
+    teamAgents(listType).forEach(function(a){
+      var o=document.createElement('option'); o.value=a.id; o.textContent='عامل واحد فقط: '+a.name;
+      assignSel.appendChild(o);
+    });
+    assignField.appendChild(assignSel);
+    importCard.appendChild(assignField);
+
     var btnRow=el('<div class="row" style="margin-top:12px;"></div>');
     var confirmBtn=el('<button class="btn" style="flex:1;">تأكيد الاستيراد ('+prev.rows.length+')</button>');
     confirmBtn.onclick=async function(){
       var m=currentMonthKey();
+      var directAgent = assignSel.value || null;
       prev.rows.forEach(function(r){
         STATE.calllists.push({
           id:uid(), listType:listType, month:m,
           name:r.name||'', phone:r.phone||'', accountNo:r.accountNo||'',
-          assignedTo:null, status:'pending', reason:null, actionDate:null
+          assignedTo:directAgent, status:'pending', reason:null, actionDate:null
         });
       });
       await saveCalllists();
@@ -1450,7 +1520,8 @@ function renderListsTab(){
     var retryBtn=el('<button class="btn block" style="margin-top:10px;">إعادتهم لقائمة الانتظار ('+retryList.length+')</button>');
     retryBtn.onclick=async function(){
       retryList.forEach(function(c){
-        c.status='pending'; c.reason=null; c.actionDate=null; c.actionAt=null; c.callDurationSeconds=null;
+        c.lastAttempt = { reason:c.reason, actionDate:c.actionDate };
+        c.status='pending'; c.reason=null; c.actionDate=null; c.actionAt=null; c.callDurationSeconds=null; c.autoTimed=null;
       });
       await saveCalllists();
       showToast('تمت إعادتهم لقائمة الانتظار ✓');
@@ -1581,25 +1652,31 @@ function frStatus(status){ return status==='success'?RL.success : status==='fail
 
 function renderReportsTab(){
   var wrap=el('<div></div>');
-  var modeToggle=el('<div class="tabs"></div>');
   var modes=[
-    {k:'summary', l:'ملخص الفريق'},
+    {k:'summary', l:'ملخص الفريق (شهري)'},
     {k:'daily', l:'تقرير يومي'},
     {k:'weekly', l:'تقرير أسبوعي'},
     {k:'range', l:'فترة مخصصة'},
-    {k:'individual', l:'تقرير فردي'}
+    {k:'individual', l:'تقرير فردي'},
+    {k:'failed', l:'المكالمات الفاشلة فقط'}
   ];
+  var pickerCard=el('<div class="card" style="margin-bottom:14px; background:var(--surface-3);"></div>');
+  pickerCard.appendChild(el('<div class="section-title" style="margin-bottom:8px;">نوع التقرير</div>'));
+  var modeSel=document.createElement('select');
   modes.forEach(function(m){
-    var b=el('<div class="tab '+(STATE.reportMode===m.k?'active':'')+'">'+m.l+'</div>');
-    b.onclick=function(){ STATE.reportMode=m.k; render(); };
-    modeToggle.appendChild(b);
+    var o=document.createElement('option'); o.value=m.k; o.textContent=m.l;
+    if(STATE.reportMode===m.k) o.selected=true;
+    modeSel.appendChild(o);
   });
-  wrap.appendChild(modeToggle);
+  modeSel.onchange=function(){ STATE.reportMode=modeSel.value; render(); };
+  pickerCard.appendChild(modeSel);
+  wrap.appendChild(pickerCard);
 
   if(STATE.reportMode==='daily') wrap.appendChild(renderDailyReport());
   else if(STATE.reportMode==='weekly') wrap.appendChild(renderWeeklyReport());
   else if(STATE.reportMode==='range') wrap.appendChild(renderCustomRangeReport());
   else if(STATE.reportMode==='individual') wrap.appendChild(renderIndividualReport());
+  else if(STATE.reportMode==='failed') wrap.appendChild(renderFailedCallsReport());
   else wrap.appendChild(renderSummaryReport());
 
   return wrap;
@@ -1607,7 +1684,10 @@ function renderReportsTab(){
 
 function renderSignatureBlock(){
   var admin = STATE.users.find(function(u){ return u.role==='admin'; });
+  var now = new Date();
+  var genStr = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0')+' '+fmtTime(now.toISOString());
   var box=el('<div style="margin-top:26px;"></div>');
+  box.appendChild(el('<div class="faint" style="font-size:10.5px; text-align:left; direction:ltr;">Généré le '+genStr+'</div>'));
   box.appendChild(el('<hr class="rule">'));
   var row=el('<div style="display:flex; gap:24px; margin-top:14px;"></div>');
   var c1=el(
@@ -1786,6 +1866,107 @@ function renderCustomRangeReport(){
   var end = STATE.reportRangeEnd || todayStr();
   if(start>end){ container.appendChild(el('<div class="error-msg">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</div>')); return container; }
   container.appendChild(renderRangeReportBody(start, end, RL.rangeTitle+' — '+start+' → '+end, 'periode-'+start+'-'+end));
+  return container;
+}
+
+function renderFailedCallsReport(){
+  var container=el('<div></div>');
+  var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  pickCard.appendChild(el('<div class="section-title">اختر الفترة</div>'));
+  var startInput=document.createElement('input'); startInput.type='date';
+  startInput.value = STATE.failedReportStart || (currentMonthKey()+'-01');
+  startInput.onchange=function(){ STATE.failedReportStart=startInput.value; render(); };
+  var endInput=document.createElement('input'); endInput.type='date';
+  endInput.value = STATE.failedReportEnd || todayStr();
+  endInput.onchange=function(){ STATE.failedReportEnd=endInput.value; render(); };
+  var f1=el('<div class="field"><label>من تاريخ</label></div>'); f1.appendChild(startInput);
+  var f2=el('<div class="field"><label>إلى تاريخ</label></div>'); f2.appendChild(endInput);
+  pickCard.appendChild(f1); pickCard.appendChild(f2);
+  container.appendChild(pickCard);
+
+  var start = STATE.failedReportStart || (currentMonthKey()+'-01');
+  var end = STATE.failedReportEnd || todayStr();
+  if(start>end){ container.appendChild(el('<div class="error-msg">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</div>')); return container; }
+
+  var failedContacts = contactsInRange(start, end, null).filter(function(c){ return c.status==='failed'; });
+  var reasonMap = {};
+  failedContacts.forEach(function(c){ reasonMap[c.reason]=(reasonMap[c.reason]||0)+1; });
+  var reasonEntries = Object.keys(reasonMap).map(function(k){ return {reason:k, count:reasonMap[k]}; }).sort(function(a,b){ return b.count-a.count; });
+
+  var titleText = 'Rapport des appels échoués — '+start+' → '+end;
+  var printArea=el('<div class="report-print"></div>');
+  printArea.appendChild(el(
+    '<div class="faint" style="font-size:11.5px;">'+escapeHtml(BANK_NAME_FR)+'</div>'+
+    '<div class="section-title" style="font-size:15px;">'+titleText+'</div>'
+  ));
+
+  var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  statCard.appendChild(el(
+    '<div class="stat-grid">'+
+    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failedContacts.length)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
+    '</div>'
+  ));
+  printArea.appendChild(statCard);
+
+  if(reasonEntries.length>0){
+    var reasonsCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+    reasonsCard.appendChild(el('<div class="section-title">'+RL.commonReasons+'</div>'));
+    var maxR=reasonEntries[0].count;
+    reasonEntries.forEach(function(e2){
+      var pct=Math.round((e2.count/maxR)*100);
+      var row=el('<div class="reason-bar-row"></div>');
+      row.appendChild(el('<div class="rlabel">'+escapeHtml(frReason(e2.reason))+'</div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
+      row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
+      reasonsCard.appendChild(row);
+    });
+    printArea.appendChild(reasonsCard);
+  }
+
+  var tableCard=el('<div class="card"></div>');
+  tableCard.appendChild(el('<div class="section-title">'+RL.contactDetails+'</div>'));
+  if(failedContacts.length===0){
+    tableCard.appendChild(el('<div class="faint">'+RL.noData+'</div>'));
+  } else {
+    var tbl=document.createElement('table');
+    tbl.innerHTML='<thead><tr><th>'+RL.agentCol+'</th><th>'+RL.name+'</th><th>'+RL.phone+'</th><th>'+RL.type+'</th><th>'+RL.date+'</th><th>'+RL.time+'</th><th>'+RL.duration+'</th><th>'+RL.reason+'</th></tr></thead>';
+    var tbody=document.createElement('tbody');
+    failedContacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
+      var agent=getUser(c.assignedTo);
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+(agent?escapeHtml(agent.name):'—')+'</td><td>'+escapeHtml(c.name||'—')+'</td>'+
+        '<td style="direction:ltr; text-align:right;">'+escapeHtml(c.phone||'—')+'</td>'+
+        '<td>'+FR_TEAM_LABEL_SHORT[c.listType]+'</td><td>'+(c.actionDate||'')+'</td>'+
+        '<td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
+        '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ⚠':'')+'</td>'+
+        '<td>'+escapeHtml(frReason(c.reason))+'</td>';
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    var twrap=el('<div class="preview-table-wrap" style="max-height:none;"></div>');
+    twrap.appendChild(tbl);
+    tableCard.appendChild(twrap);
+  }
+  printArea.appendChild(tableCard);
+  printArea.appendChild(renderSignatureBlock());
+  container.appendChild(printArea);
+
+  container.appendChild(reportActionButtons(
+    function(){ window.print(); },
+    function(){
+      var admin = STATE.users.find(function(u){ return u.role==='admin'; });
+      var aoa=[[BANK_NAME_FR],[titleText],[],[RL.failedCount, failedContacts.length],[],
+        [RL.agentCol, RL.name, RL.phone, RL.type, RL.date, RL.time, RL.duration, RL.reason]];
+      failedContacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
+        var agent=getUser(c.assignedTo);
+        aoa.push([agent?agent.name:'', c.name||'', c.phone||'', FR_TEAM_LABEL_SHORT[c.listType]||'', c.actionDate||'',
+          c.actionAt?fmtTime(c.actionAt):'', fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ('+RL.manual+')':''), frReason(c.reason)]);
+      });
+      aoa.push([]); aoa.push([RL.signatureCenterHead, admin?admin.name:'']); aoa.push([RL.signatureDirector, STATE.settings.directorName||'']);
+      exportAoaToExcel('appels-echoues-'+start+'-'+end+'.xlsx', 'Appels échoués', aoa);
+    }
+  ));
+
   return container;
 }
 
