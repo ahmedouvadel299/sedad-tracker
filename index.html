@@ -303,6 +303,8 @@ var STATE = {
   failedReportEnd:null,
   acceptedReportStart:null,
   acceptedReportEnd:null,
+  acceptedReportAgentId:null,
+  failedReportAgentId:null,
   browseTableLimit:100,   // performance: cap rendered rows in the admin "all contacts" table
   browseSearchQuery:'',
   pendingListLimit:100,   // performance: cap rendered rows in an agent's pending-contacts list
@@ -1933,13 +1935,14 @@ function renderFailedCallsReport(){
   var f1=el('<div class="field"><label>Date de début</label></div>'); f1.appendChild(startInput);
   var f2=el('<div class="field"><label>Date de fin</label></div>'); f2.appendChild(endInput);
   pickCard.appendChild(f1); pickCard.appendChild(f2);
+  pickCard.appendChild(agentFilterField(STATE.failedReportAgentId, function(v){ STATE.failedReportAgentId=v; render(); }));
   container.appendChild(pickCard);
 
   var start = STATE.failedReportStart || (currentMonthKey()+'-01');
   var end = STATE.failedReportEnd || todayStr();
   if(start>end){ container.appendChild(el('<div class="error-msg">La date de début doit précéder la date de fin</div>')); return container; }
 
-  var failedContacts = contactsInRange(start, end, null).filter(function(c){ return c.status==='failed'; });
+  var failedContacts = contactsInRange(start, end, STATE.failedReportAgentId).filter(function(c){ return c.status==='failed'; });
   var reasonMap = {};
   failedContacts.forEach(function(c){ reasonMap[c.reason]=(reasonMap[c.reason]||0)+1; });
   var reasonEntries = Object.keys(reasonMap).map(function(k){ return {reason:k, count:reasonMap[k]}; }).sort(function(a,b){ return b.count-a.count; });
@@ -2021,6 +2024,20 @@ function renderFailedCallsReport(){
   return container;
 }
 
+function agentFilterField(currentAgentId, onChange){
+  var f=el('<div class="field"><label>Filtrer par agent (optionnel)</label></div>');
+  var sel=document.createElement('select');
+  sel.appendChild(el('<option value="">— Tous les agents —</option>'));
+  agentsOnly().slice().sort(function(a,b){ return a.name.localeCompare(b.name,'ar'); }).forEach(function(a){
+    var o=document.createElement('option'); o.value=a.id; o.textContent=a.name+' ('+TEAM_LABEL[a.team]+')';
+    if(currentAgentId===a.id) o.selected=true;
+    sel.appendChild(o);
+  });
+  sel.onchange=function(){ onChange(sel.value||null); };
+  f.appendChild(sel);
+  return f;
+}
+
 function renderAcceptedCallsReport(){
   var container=el('<div></div>');
   var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
@@ -2034,13 +2051,14 @@ function renderAcceptedCallsReport(){
   var f1=el('<div class="field"><label>Date de début</label></div>'); f1.appendChild(startInput);
   var f2=el('<div class="field"><label>Date de fin</label></div>'); f2.appendChild(endInput);
   pickCard.appendChild(f1); pickCard.appendChild(f2);
+  pickCard.appendChild(agentFilterField(STATE.acceptedReportAgentId, function(v){ STATE.acceptedReportAgentId=v; render(); }));
   container.appendChild(pickCard);
 
   var start = STATE.acceptedReportStart || (currentMonthKey()+'-01');
   var end = STATE.acceptedReportEnd || todayStr();
   if(start>end){ container.appendChild(el('<div class="error-msg">La date de début doit précéder la date de fin</div>')); return container; }
 
-  var acceptedContacts = contactsInRange(start, end, null).filter(function(c){ return c.status==='success'; });
+  var acceptedContacts = contactsInRange(start, end, STATE.acceptedReportAgentId).filter(function(c){ return c.status==='success'; });
   var reasonMap = {};
   acceptedContacts.forEach(function(c){ reasonMap[c.reason]=(reasonMap[c.reason]||0)+1; });
   var reasonEntries = Object.keys(reasonMap).map(function(k){ return {reason:k, count:reasonMap[k]}; }).sort(function(a,b){ return b.count-a.count; });
@@ -2427,6 +2445,7 @@ function arabicMonthLabel(ym){
 }
 
 function renderSettingsTab(){
+  var container=el('<div></div>');
   var wrap=el('<div class="card"></div>');
   wrap.appendChild(el('<div class="section-title">Paramètres des objectifs</div>'));
 
@@ -2458,8 +2477,39 @@ function renderSettingsTab(){
 
   wrap.appendChild(el('<hr class="rule">'));
   wrap.appendChild(el('<div class="faint" style="font-size:12px;">Remarque : ces données sont partagées entre toutes les personnes qui ouvrent cette application et se connectent. Vous pouvez modifier l\'objectif individuel de chaque agent depuis l\'onglet « Équipe » si besoin.</div>'));
+  container.appendChild(wrap);
 
-  return wrap;
+  // ---- legacy manual-entry cleanup (old removed "manual add" feature) ----
+  var monthKeyNow = currentMonthKey();
+  var agentsWithManual = agentsOnly().map(function(a){
+    var monthTotalVal = monthTotal(a.id, monthKeyNow);
+    return {agent:a, total:monthTotalVal};
+  }).filter(function(x){ return x.total>0; });
+
+  if(agentsWithManual.length>0){
+    var cleanCard=el('<div class="card" style="margin-top:14px; border-color:var(--danger);"></div>');
+    cleanCard.appendChild(el(
+      '<div class="section-title">Anciennes entrées manuelles ('+arabicMonthLabel(monthKeyNow)+')</div>'+
+      '<div class="faint" style="font-size:11.5px; margin-bottom:10px;">Ces totaux proviennent de l\'ancien compteur manuel (retiré depuis) et restent comptabilisés dans les statistiques. Réinitialisez-les si nécessaire.</div>'
+    ));
+    agentsWithManual.forEach(function(x){
+      var row=el('<div class="agent-list-item"></div>');
+      row.appendChild(el('<div class="meta"><div class="aname">'+escapeHtml(x.agent.name)+'</div><div class="faint" style="font-size:11.5px;">'+fmtNum(x.total)+' entrée(s) manuelle(s) ce mois-ci</div></div>'));
+      var resetBtn=el('<button class="btn danger" style="padding:7px 12px; font-size:12px;">Réinitialiser</button>');
+      resetBtn.onclick=async function(){
+        if(!confirm('Remettre à zéro les entrées manuelles de '+x.agent.name+' pour ce mois-ci ?')) return;
+        STATE.entries = STATE.entries.filter(function(e){ return !(e.userId===x.agent.id && monthKey(e.date)===monthKeyNow); });
+        await saveEntries();
+        showToast('Réinitialisé ✓');
+        render();
+      };
+      row.appendChild(resetBtn);
+      cleanCard.appendChild(row);
+    });
+    container.appendChild(cleanCard);
+  }
+
+  return container;
 }
 
 /* ============================== INIT ============================== */
