@@ -280,6 +280,7 @@
 (function(){
 
 /* ============================== STATE ============================== */
+var browseSearchDebounce=null;
 var STATE = {
   ready:false,
   users:[],
@@ -300,6 +301,11 @@ var STATE = {
   reportRangeEnd:null,
   failedReportStart:null,
   failedReportEnd:null,
+  acceptedReportStart:null,
+  acceptedReportEnd:null,
+  browseTableLimit:100,   // performance: cap rendered rows in the admin "all contacts" table
+  browseSearchQuery:'',
+  pendingListLimit:100,   // performance: cap rendered rows in an agent's pending-contacts list
   importPreview:null,  // {listType, rows:[{name,phone,accountNo}]}
   modal:null,           // {type:'action', contactId, actionType} | {type:'editUser', userId}
   callStarts:{},        // contactId -> Date.now() when the in-app call button was pressed (not persisted)
@@ -319,29 +325,7 @@ var DEFAULT_SETTINGS = {
 
 var TEAM_LABEL = { 'تفعيل':'Groupe contact client non valide', 'استخدام':'Groupe contact client inactif' };
 
-var REASONS = [
-  'نسي كلمة السر',
-  'لا يملك رصيداً كافياً',
-  'لم يفهم كيفية الاستخدام',
-  'الرقم لا يرد / مغلق',
-  'رفض / غير مهتم',
-  'مشكلة تقنية في التطبيق',
-  'رقم غير صحيح',
-  'أخرى'
-];
-// أسباب مؤقتة يُحتمل تغيّرها لاحقاً — مؤهلة لإعادة الاتصال بعد فترة
-var RECOVERABLE_REASONS = ['نسي كلمة السر', 'لا يملك رصيداً كافياً', 'مشكلة تقنية في التطبيق', 'الرقم لا يرد / مغلق'];
-var RETRY_AFTER_DAYS = 14;
-
-/* ---- French labels used in generated reports (Excel/PDF) — operational Arabic UI stays as-is ---- */
-var BANK_NAME_FR = 'البنك الموريتاني للاستثمار';
-var FR_TEAM_LABEL = { 'تفعيل':'Groupe contact client non valide', 'استخدام':'Groupe contact client inactif' };
-var FR_TEAM_LABEL_SHORT = { 'تفعيل':'Non valide', 'استخدام':'Inactif' };
-function frRoleLabel(u){
-  if(u.role==='admin') return 'Responsable de centre contact';
-  if(u.role==='assistant') return 'Assistante';
-  return 'Agent — ' + FR_TEAM_LABEL[u.team];
-}
+/* Anciennes valeurs arabes (historique) — conservées pour l'affichage rétrocompatible uniquement */
 var REASONS_FR = {
   'نسي كلمة السر':'Mot de passe oublié',
   'لا يملك رصيداً كافياً':'Solde insuffisant',
@@ -353,6 +337,38 @@ var REASONS_FR = {
   'أخرى':'Autre'
 };
 function frReason(r){ return r ? (REASONS_FR[r] || r) : ''; }
+
+/* Motifs — appel réussi (client joint) */
+var SUCCESS_REASONS = [
+  'Validé',
+  'Déjà validé',
+  'Mot de passe oublié',
+  'Blocage',
+  'Changement de téléphone',
+  'Changement de numéro',
+  "Le client n'a pas connaissance de son compte",
+  'Autre'
+];
+/* Motifs — appel échoué (client non joint / non intéressé) */
+var FAIL_REASONS = [
+  'Injoignable',
+  'Non intéressé',
+  'En cours',
+  'Autre'
+];
+// Motifs temporaires susceptibles de changer plus tard — éligibles au rappel après un délai
+var RECOVERABLE_REASONS = ['Injoignable', 'En cours', 'نسي كلمة السر', 'لا يملك رصيداً كافياً', 'مشكلة تقنية في التطبيق', 'الرقم لا يرد / مغلق'];
+var RETRY_AFTER_DAYS = 14;
+
+/* ---- French labels used in generated reports (Excel/PDF) — operational Arabic UI stays as-is ---- */
+var BANK_NAME_FR = 'البنك الموريتاني للاستثمار';
+var FR_TEAM_LABEL = { 'تفعيل':'Groupe contact client non valide', 'استخدام':'Groupe contact client inactif' };
+var FR_TEAM_LABEL_SHORT = { 'تفعيل':'Non valide', 'استخدام':'Inactif' };
+function frRoleLabel(u){
+  if(u.role==='admin') return 'Responsable de centre contact';
+  if(u.role==='assistant') return 'Assistante';
+  return 'Agent — ' + FR_TEAM_LABEL[u.team];
+}
 var RL = {
   summaryTitle: "Rapport résumé de l'équipe",
   dailyTitle: 'Rapport journalier',
@@ -754,26 +770,25 @@ function renderActionModal(contactId, actionType){
   sheet.appendChild(el('<div class="faint" style="margin-bottom:10px;">'+(c?escapeHtml(c.name||''):'')+'</div>'));
 
   var selected = {reason:null, custom:''};
-  if(actionType==='fail'){
-    var grid=el('<div class="reason-grid"></div>');
-    REASONS.forEach(function(r){
-      var chip=el('<div class="reason-chip">'+frReason(r)+'</div>');
-      chip.onclick=function(){
-        selected.reason=r;
-        grid.querySelectorAll('.reason-chip').forEach(function(x){ x.classList.remove('selected'); });
-        chip.classList.add('selected');
-        customBox.style.display = (r==='أخرى') ? 'block' : 'none';
-      };
-      grid.appendChild(chip);
-    });
-    sheet.appendChild(grid);
-    var customBox=el('<div class="field" style="display:none;"><label>Précisez le motif</label></div>');
-    var customInput=document.createElement('input');
-    customInput.placeholder='Écrivez le motif ici...';
-    customInput.oninput=function(){ selected.custom=customInput.value; };
-    customBox.appendChild(customInput);
-    sheet.appendChild(customBox);
-  }
+  var reasonList = actionType==='success' ? SUCCESS_REASONS : FAIL_REASONS;
+  var grid=el('<div class="reason-grid"></div>');
+  reasonList.forEach(function(r){
+    var chip=el('<div class="reason-chip">'+r+'</div>');
+    chip.onclick=function(){
+      selected.reason=r;
+      grid.querySelectorAll('.reason-chip').forEach(function(x){ x.classList.remove('selected'); });
+      chip.classList.add('selected');
+      customBox.style.display = (r==='Autre') ? 'block' : 'none';
+    };
+    grid.appendChild(chip);
+  });
+  sheet.appendChild(grid);
+  var customBox=el('<div class="field" style="display:none;"><label>Précisez le motif</label></div>');
+  var customInput=document.createElement('input');
+  customInput.placeholder='Écrivez le motif ici...';
+  customInput.oninput=function(){ selected.custom=customInput.value; };
+  customBox.appendChild(customInput);
+  sheet.appendChild(customBox);
 
   var callStart = STATE.callStarts[contactId];
   var autoSeconds = callStart ? Math.round((Date.now()-callStart)/1000) : null;
@@ -802,7 +817,7 @@ function renderActionModal(contactId, actionType){
 
   var confirmBtn=el('<button class="btn block" style="margin-top:6px;">Confirmer</button>');
   confirmBtn.onclick=async function(){
-    if(actionType==='fail' && !selected.reason){ showToast('Choisissez un motif d\'abord'); return; }
+    if(!selected.reason){ showToast('Choisissez un motif d\'abord'); return; }
     var durationSeconds, autoTimed;
     if(autoSeconds!==null){
       durationSeconds=autoSeconds; autoTimed=true;
@@ -811,14 +826,14 @@ function renderActionModal(contactId, actionType){
       var secs=Math.max(0, Math.min(59, parseInt(secInput.value)||0));
       durationSeconds=mins*60+secs; autoTimed=false;
     }
-    var finalReason = selected.reason==='أخرى' && selected.custom.trim() ? selected.custom.trim() : selected.reason;
+    var finalReason = selected.reason==='Autre' && selected.custom.trim() ? selected.custom.trim() : selected.reason;
     if(c){
       c.status = actionType==='success' ? 'success' : 'failed';
       c.actionDate = todayStr();
       c.actionAt = new Date().toISOString();
       c.callDurationSeconds = durationSeconds;
       c.autoTimed = autoTimed;
-      c.reason = actionType==='fail' ? finalReason : null;
+      c.reason = finalReason;
     }
     delete STATE.callStarts[contactId];
     await saveCalllists();
@@ -1127,9 +1142,15 @@ function renderAgentListTab(user){
   if(pending.length===0){
     card.appendChild(el('<div class="empty-state"><div class="icon">✅</div><div>Aucun contact restant dans votre liste actuellement</div></div>'));
   } else {
-    pending.forEach(function(c){
+    var limit=STATE.pendingListLimit;
+    pending.slice(0, limit).forEach(function(c){
       card.appendChild(contactRow(c));
     });
+    if(pending.length>limit){
+      var moreBtn=el('<button class="btn secondary block" style="margin-top:10px;">Afficher plus ('+(pending.length-limit)+' restants)</button>');
+      moreBtn.onclick=function(){ STATE.pendingListLimit+=100; render(); };
+      card.appendChild(moreBtn);
+    }
   }
   wrap.appendChild(card);
 
@@ -1155,7 +1176,7 @@ function contactRow(c, readOnly){
   }
   if(readOnly){
     var pillClass = c.status==='success' ? 'success' : 'failed';
-    var pillLabel = c.status==='success' ? 'Réussi' : ('Échec — '+(frReason(c.reason)||''));
+    var pillLabel = c.status==='success' ? ('Réussi — '+(c.reason||'')) : ('Échec — '+(frReason(c.reason)||''));
     var extra = (c.actionAt?fmtTime(c.actionAt):'') + (c.callDurationSeconds!=null?(' — durée: '+fmtDurationFr(c.callDurationSeconds)):'') + (c.autoTimed===false?' ⚠ manuel':'');
     meta.appendChild(el('<div style="margin-top:5px;"><span class="status-pill '+pillClass+'">'+escapeHtml(pillLabel)+'</span></div>'));
     if(extra.trim()) meta.appendChild(el('<div class="faint" style="font-size:11px; margin-top:3px;">'+escapeHtml(extra)+'</div>'));
@@ -1538,10 +1559,29 @@ function renderListsTab(){
       '<div class="section-title">Tous les contacts — '+arabicMonthLabel(currentMonthKey())+' ('+monthContacts.length+')</div>'+
       '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">Cliquez sur « Vérifier » après avoir appelé le client vous-même pour confirmer le contact — pour un contrôle aléatoire</div>'
     ));
+
+    var searchInput=document.createElement('input');
+    searchInput.type='search'; searchInput.placeholder='Rechercher par nom ou téléphone...';
+    searchInput.value=STATE.browseSearchQuery; searchInput.style.marginBottom='10px';
+    searchInput.oninput=function(){
+      var v=searchInput.value;
+      clearTimeout(browseSearchDebounce);
+      browseSearchDebounce=setTimeout(function(){ STATE.browseSearchQuery=v; STATE.browseTableLimit=100; render(); }, 350);
+    };
+    browseCard.appendChild(searchInput);
+
+    var q=(STATE.browseSearchQuery||'').trim().toLowerCase();
+    var filteredContacts = q ? monthContacts.filter(function(c){
+      return (c.name||'').toLowerCase().indexOf(q)!==-1 || (c.phone||'').toLowerCase().indexOf(q)!==-1;
+    }) : monthContacts;
+
+    var limit=STATE.browseTableLimit;
+    var visibleContacts=filteredContacts.slice(0, limit);
+
     var btbl=document.createElement('table');
     btbl.innerHTML='<thead><tr><th>Nom</th><th>Assigné à</th><th>Statut</th><th>Durée</th><th>Vérification</th><th></th></tr></thead>';
     var btbody=document.createElement('tbody');
-    monthContacts.forEach(function(c){
+    visibleContacts.forEach(function(c){
       var tr=document.createElement('tr');
       var tdName=document.createElement('td');
       var nameInput=document.createElement('input');
@@ -1589,6 +1629,15 @@ function renderListsTab(){
     var bwrap=el('<div class="preview-table-wrap"></div>');
     bwrap.appendChild(btbl);
     browseCard.appendChild(bwrap);
+
+    if(filteredContacts.length>limit){
+      var loadMoreBtn=el('<button class="btn secondary block" style="margin-top:10px;">Afficher plus ('+(filteredContacts.length-limit)+' restants)</button>');
+      loadMoreBtn.onclick=function(){ STATE.browseTableLimit+=100; render(); };
+      browseCard.appendChild(loadMoreBtn);
+    } else if(filteredContacts.length===0){
+      browseCard.appendChild(el('<div class="faint" style="margin-top:8px;">Aucun résultat pour cette recherche</div>'));
+    }
+
     wrap.appendChild(browseCard);
   }
 
@@ -1658,7 +1707,8 @@ function renderReportsTab(){
     {k:'weekly', l:'Rapport hebdomadaire'},
     {k:'range', l:'Période personnalisée'},
     {k:'individual', l:'Rapport individuel'},
-    {k:'failed', l:'Appels échoués uniquement'}
+    {k:'failed', l:'Appels échoués uniquement'},
+    {k:'accepted', l:'Appels acceptés uniquement'}
   ];
   var pickerCard=el('<div class="card" style="margin-bottom:14px; background:var(--surface-3);"></div>');
   pickerCard.appendChild(el('<div class="section-title" style="margin-bottom:8px;">Type de rapport</div>'));
@@ -1677,6 +1727,7 @@ function renderReportsTab(){
   else if(STATE.reportMode==='range') wrap.appendChild(renderCustomRangeReport());
   else if(STATE.reportMode==='individual') wrap.appendChild(renderIndividualReport());
   else if(STATE.reportMode==='failed') wrap.appendChild(renderFailedCallsReport());
+  else if(STATE.reportMode==='accepted') wrap.appendChild(renderAcceptedCallsReport());
   else wrap.appendChild(renderSummaryReport());
 
   return wrap;
@@ -1970,6 +2021,107 @@ function renderFailedCallsReport(){
   return container;
 }
 
+function renderAcceptedCallsReport(){
+  var container=el('<div></div>');
+  var pickCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  pickCard.appendChild(el('<div class="section-title">Choisir la période</div>'));
+  var startInput=document.createElement('input'); startInput.type='date';
+  startInput.value = STATE.acceptedReportStart || (currentMonthKey()+'-01');
+  startInput.onchange=function(){ STATE.acceptedReportStart=startInput.value; render(); };
+  var endInput=document.createElement('input'); endInput.type='date';
+  endInput.value = STATE.acceptedReportEnd || todayStr();
+  endInput.onchange=function(){ STATE.acceptedReportEnd=endInput.value; render(); };
+  var f1=el('<div class="field"><label>Date de début</label></div>'); f1.appendChild(startInput);
+  var f2=el('<div class="field"><label>Date de fin</label></div>'); f2.appendChild(endInput);
+  pickCard.appendChild(f1); pickCard.appendChild(f2);
+  container.appendChild(pickCard);
+
+  var start = STATE.acceptedReportStart || (currentMonthKey()+'-01');
+  var end = STATE.acceptedReportEnd || todayStr();
+  if(start>end){ container.appendChild(el('<div class="error-msg">La date de début doit précéder la date de fin</div>')); return container; }
+
+  var acceptedContacts = contactsInRange(start, end, null).filter(function(c){ return c.status==='success'; });
+  var reasonMap = {};
+  acceptedContacts.forEach(function(c){ reasonMap[c.reason]=(reasonMap[c.reason]||0)+1; });
+  var reasonEntries = Object.keys(reasonMap).map(function(k){ return {reason:k, count:reasonMap[k]}; }).sort(function(a,b){ return b.count-a.count; });
+
+  var titleText = 'Rapport des appels acceptés — '+start+' → '+end;
+  var printArea=el('<div class="report-print"></div>');
+  printArea.appendChild(el(
+    '<div class="faint" style="font-size:11.5px;">'+escapeHtml(BANK_NAME_FR)+'</div>'+
+    '<div class="section-title" style="font-size:15px;">'+titleText+'</div>'
+  ));
+
+  var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+  statCard.appendChild(el(
+    '<div class="stat-grid">'+
+    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(acceptedContacts.length)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
+    '</div>'
+  ));
+  printArea.appendChild(statCard);
+
+  if(reasonEntries.length>0){
+    var reasonsCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+    reasonsCard.appendChild(el('<div class="section-title">Répartition des motifs de réussite</div>'));
+    var maxR=reasonEntries[0].count;
+    reasonEntries.forEach(function(e2){
+      var pct=Math.round((e2.count/maxR)*100);
+      var row=el('<div class="reason-bar-row"></div>');
+      row.appendChild(el('<div class="rlabel">'+escapeHtml(e2.reason||'')+'</div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#5AA57C;"></div></div>'));
+      row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
+      reasonsCard.appendChild(row);
+    });
+    printArea.appendChild(reasonsCard);
+  }
+
+  var tableCard=el('<div class="card"></div>');
+  tableCard.appendChild(el('<div class="section-title">'+RL.contactDetails+'</div>'));
+  if(acceptedContacts.length===0){
+    tableCard.appendChild(el('<div class="faint">'+RL.noData+'</div>'));
+  } else {
+    var tbl=document.createElement('table');
+    tbl.innerHTML='<thead><tr><th>'+RL.agentCol+'</th><th>'+RL.name+'</th><th>'+RL.phone+'</th><th>'+RL.type+'</th><th>'+RL.date+'</th><th>'+RL.time+'</th><th>'+RL.duration+'</th><th>'+RL.reason+'</th></tr></thead>';
+    var tbody=document.createElement('tbody');
+    acceptedContacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
+      var agent=getUser(c.assignedTo);
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+(agent?escapeHtml(agent.name):'—')+'</td><td>'+escapeHtml(c.name||'—')+'</td>'+
+        '<td style="direction:ltr; text-align:right;">'+escapeHtml(c.phone||'—')+'</td>'+
+        '<td>'+FR_TEAM_LABEL_SHORT[c.listType]+'</td><td>'+(c.actionDate||'')+'</td>'+
+        '<td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
+        '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ⚠':'')+'</td>'+
+        '<td>'+escapeHtml(c.reason||'')+'</td>';
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    var twrap=el('<div class="preview-table-wrap" style="max-height:none;"></div>');
+    twrap.appendChild(tbl);
+    tableCard.appendChild(twrap);
+  }
+  printArea.appendChild(tableCard);
+  printArea.appendChild(renderSignatureBlock());
+  container.appendChild(printArea);
+
+  container.appendChild(reportActionButtons(
+    function(){ window.print(); },
+    function(){
+      var admin = STATE.users.find(function(u){ return u.role==='admin'; });
+      var aoa=[[BANK_NAME_FR],[titleText],[],[RL.successCount, acceptedContacts.length],[],
+        [RL.agentCol, RL.name, RL.phone, RL.type, RL.date, RL.time, RL.duration, RL.reason]];
+      acceptedContacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
+        var agent=getUser(c.assignedTo);
+        aoa.push([agent?agent.name:'', c.name||'', c.phone||'', FR_TEAM_LABEL_SHORT[c.listType]||'', c.actionDate||'',
+          c.actionAt?fmtTime(c.actionAt):'', fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ('+RL.manual+')':''), c.reason||'']);
+      });
+      aoa.push([]); aoa.push([RL.signatureCenterHead, admin?admin.name:'']); aoa.push([RL.signatureDirector, STATE.settings.directorName||'']);
+      exportAoaToExcel('appels-acceptes-'+start+'-'+end+'.xlsx', 'Appels acceptés', aoa);
+    }
+  ));
+
+  return container;
+}
+
 function renderRangeReportBody(startDate, endDate, titleText, fileSlug){
   var container=el('<div></div>');
   var contacts = contactsInRange(startDate, endDate, null);
@@ -2036,7 +2188,7 @@ function renderRangeReportBody(startDate, endDate, titleText, fileSlug){
         '<td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
         '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠ '+RL.manual+'</span>':'')+'</td>'+
         '<td>'+frStatus(c.status)+'</td>'+
-        '<td>'+(c.status==='failed'?escapeHtml(frReason(c.reason)):'—')+'</td>';
+        '<td>'+(c.reason?escapeHtml(c.status==='failed'?frReason(c.reason):c.reason):'—')+'</td>';
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -2095,7 +2247,7 @@ function renderRangeReportBody(startDate, endDate, titleText, fileSlug){
         aoa.push([
           agent?agent.name:'', c.name||'', c.phone||'', FR_TEAM_LABEL_SHORT[c.listType]||'',
           c.actionDate||'', c.actionAt?fmtTime(c.actionAt):'', fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ('+RL.manual+')':''),
-          frStatus(c.status), c.status==='failed'?frReason(c.reason):''
+          frStatus(c.status), c.reason?(c.status==='failed'?frReason(c.reason):c.reason):''
         ]);
       });
       if(manualEntries.length>0){
@@ -2217,7 +2369,7 @@ function renderIndividualReport(){
         '<td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
         '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠</span>':'')+'</td>'+
         '<td>'+frStatus(c.status)+'</td>'+
-        '<td>'+(c.status==='failed'?escapeHtml(frReason(c.reason)):'—')+'</td>';
+        '<td>'+(c.reason?escapeHtml(c.status==='failed'?frReason(c.reason):c.reason):'—')+'</td>';
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -2258,7 +2410,7 @@ function renderIndividualReport(){
       ];
       contacts.slice().sort(function(a,b){ return (a.actionAt||'').localeCompare(b.actionAt||''); }).forEach(function(c){
         aoa.push([c.name||'', c.phone||'', FR_TEAM_LABEL_SHORT[c.listType]||'', c.actionDate||'', c.actionAt?fmtTime(c.actionAt):'',
-          fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ('+RL.manual+')':''), frStatus(c.status), c.status==='failed'?frReason(c.reason):'']);
+          fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' ('+RL.manual+')':''), frStatus(c.status), c.reason?(c.status==='failed'?frReason(c.reason):c.reason):'']);
       });
       aoa.push([]); aoa.push([RL.signatureCenterHead, admin?admin.name:'']); aoa.push([RL.signatureDirector, STATE.settings.directorName||'']);
       exportAoaToExcel('rapport-individuel-'+agent.name.replace(/\s+/g,'-')+'.xlsx', RL.individualTitle, aoa);
