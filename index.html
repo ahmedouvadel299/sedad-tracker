@@ -453,6 +453,18 @@ async function dbSet(key, value){
   if(!res.ok) throw new Error('save failed: ' + res.status);
   return true;
 }
+// Multi-location atomic update: only touches the specific child keys given, leaving
+// everything else untouched — critical when several people (agents + admin) use the
+// app at the same time, so one person's save never overwrites another's in-progress work.
+async function dbPatch(key, updatesObj){
+  var res = await fetch(FIREBASE_DB_URL + '/' + APP_KEY + '/' + key + '.json', {
+    method:'PATCH',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(updatesObj)
+  });
+  if(!res.ok) throw new Error('save failed: ' + res.status);
+  return true;
+}
 
 async function loadAll(){
   if(!firebaseConfigured()){ STATE.ready='unconfigured'; return; }
@@ -466,13 +478,99 @@ async function loadAll(){
     STATE.settings = (await dbGet('settings')) || Object.assign({}, DEFAULT_SETTINGS);
   }catch(e){ STATE.settings = Object.assign({}, DEFAULT_SETTINGS); STATE.loadError=true; }
   try{
-    STATE.calllists = (await dbGet('calllists')) || [];
+    var rawCalllists = await dbGet('calllists');
+    if(Array.isArray(rawCalllists)){
+      // one-time migration: legacy storage kept the whole list under numeric indices,
+      // which would create duplicates once we start patching by contact id — rewrite once.
+      var migrated={};
+      rawCalllists.forEach(function(c){ if(c && c.id) migrated[c.id]=c; });
+      STATE.calllists = Object.keys(migrated).map(function(k){ return migrated[k]; });
+      dbSet('calllists', migrated).catch(function(){});
+    } else {
+      STATE.calllists = rawCalllists ? Object.keys(rawCalllists).map(function(k){ return rawCalllists[k]; }) : [];
+    }
   }catch(e){ STATE.calllists = []; STATE.loadError=true; }
   STATE.ready = true;
 }
-async function saveCalllists(){
-  try{ await dbSet('calllists', STATE.calllists); }
+// Upsert one or more contacts (their .id is the key) without touching any other contact's data.
+async function saveCalllistItems(items){
+  var updates={};
+  items.forEach(function(c){ updates[c.id]=c; });
+  try{ await dbPatch('calllists', updates); }
   catch(e){ showToast('Échec de l\'enregistrement, vérifiez la connexion internet'); }
+}
+// Delete one or more contacts by id without touching any other contact's data.
+async function deleteCalllistItems(ids){
+  var updates={};
+  ids.forEach(function(id){ updates[id]=null; });
+  try{ await dbPatch('calllists', updates); }
+  catch(e){ showToast('Échec de la suppression, vérifiez la connexion internet'); }
+}
+async function refreshCalllists(){
+  try{
+    var raw = await dbGet('calllists');
+    STATE.calllists = raw ? Object.keys(raw).map(function(k){ return raw[k]; }) : [];
+    return true;
+  }catch(e){ showToast('Échec de l\'actualisation, vérifiez la connexion internet'); return false; }
+}
+
+/* ============================== LIVE SYNC (temps réel, sans rechargement) ==============================
+   Firebase Realtime Database peut diffuser les changements via un flux d'événements (SSE).
+   Dès qu'une personne enregistre quelque chose, tous les autres écrans connectés se mettent
+   à jour automatiquement — sans bouton, sans recharger la page.
+============================================================================================================ */
+var calllistsById = {};
+function rebuildCalllistsArray(){ STATE.calllists = Object.keys(calllistsById).map(function(k){ return calllistsById[k]; }); }
+function safeLiveRender(){
+  // évite d'interrompre quelqu'un en train de taper ou une fenêtre ouverte
+  var ae = document.activeElement;
+  var typing = ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT');
+  if(STATE.modal || typing || !STATE.currentUserId) return;
+  render();
+}
+function applyCalllistsStreamEvent(type, path, data){
+  if(path==='/' || path===''){
+    if(type==='put'){
+      calllistsById = {};
+      if(data){ Object.keys(data).forEach(function(k){ calllistsById[k]=data[k]; }); }
+    } else if(data){
+      Object.keys(data).forEach(function(k){
+        if(data[k]===null){ delete calllistsById[k]; } else { calllistsById[k]=data[k]; }
+      });
+    }
+  } else {
+    var key=path.replace(/^\//,'').split('/')[0];
+    if(data===null){ delete calllistsById[key]; } else { calllistsById[key]=data; }
+  }
+}
+function startCalllistsLiveSync(){
+  if(!firebaseConfigured() || typeof EventSource==='undefined') return;
+  try{
+    var es=new EventSource(FIREBASE_DB_URL+'/'+APP_KEY+'/calllists.json');
+    es.addEventListener('put', function(e){
+      try{ var msg=JSON.parse(e.data); applyCalllistsStreamEvent('put', msg.path, msg.data); rebuildCalllistsArray(); safeLiveRender(); }catch(err){}
+    });
+    es.addEventListener('patch', function(e){
+      try{ var msg=JSON.parse(e.data); applyCalllistsStreamEvent('patch', msg.path, msg.data); rebuildCalllistsArray(); safeLiveRender(); }catch(err){}
+    });
+  }catch(e){}
+}
+function startSimpleLiveSync(key, applyFn){
+  if(!firebaseConfigured() || typeof EventSource==='undefined') return;
+  try{
+    var es=new EventSource(FIREBASE_DB_URL+'/'+APP_KEY+'/'+key+'.json');
+    es.addEventListener('put', function(e){
+      try{ var msg=JSON.parse(e.data); if(msg.path==='/'||msg.path===''){ applyFn(msg.data); safeLiveRender(); } }catch(err){}
+    });
+  }catch(e){}
+}
+function startAllLiveSync(){
+  calllistsById={};
+  STATE.calllists.forEach(function(c){ if(c && c.id) calllistsById[c.id]=c; });
+  startCalllistsLiveSync();
+  startSimpleLiveSync('users', function(data){ STATE.users = data||[]; });
+  startSimpleLiveSync('entries', function(data){ STATE.entries = data||[]; });
+  startSimpleLiveSync('settings', function(data){ STATE.settings = data||Object.assign({}, DEFAULT_SETTINGS); });
 }
 async function saveUsers(){
   try{ await dbSet('users', STATE.users); }
@@ -840,7 +938,7 @@ function renderActionModal(contactId, actionType){
       c.reason = finalReason;
     }
     delete STATE.callStarts[contactId];
-    await saveCalllists();
+    if(c){ await saveCalllistItems([c]); }
     STATE.modal=null;
     showToast('Enregistré');
     render();
@@ -917,6 +1015,15 @@ function renderTopbar(user){
     '<div class="sub">البنك الموريتاني للاستثمار</div></div></div>'
   ));
   var right=el('<div class="row"></div>');
+  var refreshBtn=el('<button class="logout-btn" title="Actualiser les données">⟳</button>');
+  refreshBtn.onclick=async function(){
+    refreshBtn.textContent='…';
+    var ok=await refreshCalllists();
+    refreshBtn.textContent='⟳';
+    if(ok) showToast('Données actualisées ✓');
+    render();
+  };
+  right.appendChild(refreshBtn);
   right.appendChild(el('<div class="whoami">'+roleLabel(user)+' — <b>'+escapeHtml(user.name)+'</b></div>'));
   var btn=el('<button class="logout-btn">Déconnexion</button>');
   btn.onclick=function(){ STATE.currentUserId=null; STATE.pinBuffer=''; STATE.loginStep='name'; STATE.loginSelectedUser=null; render(); };
@@ -1463,15 +1570,18 @@ function renderListsTab(){
       var now = new Date();
       var defaultLabel = String(now.getDate()).padStart(2,'0')+'/'+String(now.getMonth()+1).padStart(2,'0')+' — '+fmtTime(now.toISOString());
       var batchLabel = batchNameInput.value.trim() || defaultLabel;
+      var newItems=[];
       prev.rows.forEach(function(r){
-        STATE.calllists.push({
+        var item = {
           id:uid(), listType:listType, month:m,
           name:r.name||'', phone:r.phone||'', accountNo:r.accountNo||'',
           assignedTo:directAgent, status:'pending', reason:null, actionDate:null,
           batchId:batchId, batchLabel:batchLabel
-        });
+        };
+        STATE.calllists.push(item);
+        newItems.push(item);
       });
-      await saveCalllists();
+      await saveCalllistItems(newItems);
       STATE.importPreview=null;
       showToast(prev.rows.length+' contacts importés ✓');
       render();
@@ -1505,7 +1615,7 @@ function renderListsTab(){
           c.assignedTo = agentsInTeam[idx % agentsInTeam.length].id;
           idx++;
         });
-        await saveCalllists();
+        await saveCalllistItems(unassigned);
         showToast('Répartition effectuée ✓');
         render();
       };
@@ -1539,7 +1649,7 @@ function renderListsTab(){
       var archiveBtn=el('<button class="btn secondary" style="padding:7px 12px; font-size:12px;">'+(isArchived?'Désarchiver':'Archiver')+'</button>');
       archiveBtn.onclick=async function(){
         b.contacts.forEach(function(c){ c.archived = !isArchived; });
-        await saveCalllists();
+        await saveCalllistItems(b.contacts);
         showToast(isArchived?'Liste restaurée ✓':'Liste archivée ✓');
         render();
       };
@@ -1548,7 +1658,7 @@ function renderListsTab(){
         if(!confirm('Supprimer définitivement « '+b.label+' » ('+b.contacts.length+' contacts) ? Cette action est irréversible et supprimera aussi ses données des rapports.')) return;
         var idsToRemove = b.contacts.map(function(c){ return c.id; });
         STATE.calllists = STATE.calllists.filter(function(c){ return idsToRemove.indexOf(c.id)===-1; });
-        await saveCalllists();
+        await deleteCalllistItems(idsToRemove);
         showToast('Liste supprimée ✓');
         render();
       };
@@ -1602,7 +1712,7 @@ function renderListsTab(){
         c.lastAttempt = { reason:c.reason, actionDate:c.actionDate };
         c.status='pending'; c.reason=null; c.actionDate=null; c.actionAt=null; c.callDurationSeconds=null; c.autoTimed=null;
       });
-      await saveCalllists();
+      await saveCalllistItems(retryList);
       showToast('Remis en attente ✓');
       render();
     };
@@ -1658,7 +1768,7 @@ function renderListsTab(){
       var tdName=document.createElement('td');
       var nameInput=document.createElement('input');
       nameInput.value=c.name||''; nameInput.style.fontSize='12.5px'; nameInput.style.padding='6px 8px'; nameInput.style.minWidth='110px';
-      nameInput.onchange=async function(){ c.name=nameInput.value.trim(); await saveCalllists(); showToast('Mis à jour'); };
+      nameInput.onchange=async function(){ c.name=nameInput.value.trim(); await saveCalllistItems([c]); showToast('Mis à jour'); };
       tdName.appendChild(nameInput);
       var tdBatch=document.createElement('td');
       tdBatch.innerHTML='<span class="faint" style="font-size:11px;">'+escapeHtml(c.batchLabel||'—')+(c.archived?' 📦':'')+'</span>';
@@ -1671,7 +1781,7 @@ function renderListsTab(){
         if(c.assignedTo===a.id) o.selected=true;
         sel.appendChild(o);
       });
-      sel.onchange=async function(){ c.assignedTo = sel.value || null; await saveCalllists(); showToast('Mis à jour'); };
+      sel.onchange=async function(){ c.assignedTo = sel.value || null; await saveCalllistItems([c]); showToast('Mis à jour'); };
       tdAssign.appendChild(sel);
       var tdStatus=document.createElement('td');
       var pillClass = c.status==='pending'?'pending':(c.status==='success'?'success':'failed');
@@ -1683,7 +1793,7 @@ function renderListsTab(){
       if(c.status==='pending'){ tdVerify.innerHTML='—'; }
       else {
         var vBtn=el('<button class="btn '+(c.verified?'secondary':'ghost')+'" style="padding:5px 10px; font-size:11px;">'+(c.verified?'✓ Vérifié':'Vérifier')+'</button>');
-        vBtn.onclick=async function(){ c.verified=!c.verified; await saveCalllists(); render(); };
+        vBtn.onclick=async function(){ c.verified=!c.verified; await saveCalllistItems([c]); render(); };
         tdVerify.appendChild(vBtn);
       }
       var tdDel=document.createElement('td');
@@ -1691,7 +1801,7 @@ function renderListsTab(){
       delRowBtn.onclick=async function(){
         if(!confirm('Supprimer '+(c.name||'ce contact')+' définitivement ?')) return;
         STATE.calllists = STATE.calllists.filter(function(x){ return x.id!==c.id; });
-        await saveCalllists();
+        await deleteCalllistItems([c.id]);
         showToast('Supprimé ✓');
         render();
       };
@@ -2589,6 +2699,7 @@ async function init(){
   render();
   await loadAll();
   render();
+  startAllLiveSync();
 }
 init();
 
