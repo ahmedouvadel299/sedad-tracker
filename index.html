@@ -307,6 +307,7 @@ var STATE = {
   failedReportAgentId:null,
   browseTableLimit:100,   // performance: cap rendered rows in the admin "all contacts" table
   browseSearchQuery:'',
+  browseBatchFilter:'',
   pendingListLimit:100,   // performance: cap rendered rows in an agent's pending-contacts list
   importPreview:null,  // {listType, rows:[{name,phone,accountNo}]}
   modal:null,           // {type:'action', contactId, actionType} | {type:'editUser', userId}
@@ -562,7 +563,7 @@ function teamTodayTotal(team){
   return teamAgents(team).reduce(function(s,a){ return s + combinedToday(a.id); }, 0);
 }
 function pendingContactsFor(userId){
-  return STATE.calllists.filter(function(c){ return c.assignedTo===userId && c.status==='pending'; });
+  return STATE.calllists.filter(function(c){ return c.assignedTo===userId && c.status==='pending' && !c.archived; });
 }
 function doneContactsForToday(userId){
   return STATE.calllists.filter(function(c){ return c.assignedTo===userId && c.status!=='pending' && c.actionDate===todayStr(); });
@@ -597,6 +598,7 @@ function daysSince(dateStr){
 }
 function retryEligibleContacts(listType){
   return STATE.calllists.filter(function(c){
+    if(c.archived) return false;
     if(c.status!=='failed') return false;
     if(RECOVERABLE_REASONS.indexOf(c.reason)===-1) return false;
     if(!c.actionDate || daysSince(c.actionDate)<RETRY_AFTER_DAYS) return false;
@@ -1406,7 +1408,7 @@ function renderListsTab(){
 
   var listType=STATE.adminListType;
   var monthContacts = STATE.calllists.filter(function(c){ return c.listType===listType && c.month===currentMonthKey(); });
-  var unassigned = monthContacts.filter(function(c){ return !c.assignedTo; });
+  var unassigned = monthContacts.filter(function(c){ return !c.assignedTo && !c.archived; });
 
   // ---- import card ----
   var importCard=el('<div class="card" style="margin-bottom:14px;"></div>');
@@ -1436,6 +1438,12 @@ function renderListsTab(){
     importCard.appendChild(tblWrap);
     if(prev.rows.length>12) importCard.appendChild(el('<div class="faint">et '+(prev.rows.length-12)+' lignes supplémentaires...</div>'));
 
+    var nameField=el('<div class="field" style="margin-top:12px;"><label>Nom de cette liste (optionnel, pour la retrouver plus tard)</label></div>');
+    var batchNameInput=document.createElement('input');
+    batchNameInput.placeholder='Ex: Semaine du 10 août';
+    nameField.appendChild(batchNameInput);
+    importCard.appendChild(nameField);
+
     var assignField=el('<div class="field" style="margin-top:12px;"><label>Assigner cette liste à</label></div>');
     var assignSel=document.createElement('select');
     assignSel.appendChild(el('<option value="">— Sans attribution (à répartir plus tard) —</option>'));
@@ -1451,11 +1459,16 @@ function renderListsTab(){
     confirmBtn.onclick=async function(){
       var m=currentMonthKey();
       var directAgent = assignSel.value || null;
+      var batchId = uid();
+      var now = new Date();
+      var defaultLabel = String(now.getDate()).padStart(2,'0')+'/'+String(now.getMonth()+1).padStart(2,'0')+' — '+fmtTime(now.toISOString());
+      var batchLabel = batchNameInput.value.trim() || defaultLabel;
       prev.rows.forEach(function(r){
         STATE.calllists.push({
           id:uid(), listType:listType, month:m,
           name:r.name||'', phone:r.phone||'', accountNo:r.accountNo||'',
-          assignedTo:directAgent, status:'pending', reason:null, actionDate:null
+          assignedTo:directAgent, status:'pending', reason:null, actionDate:null,
+          batchId:batchId, batchLabel:batchLabel
         });
       });
       await saveCalllists();
@@ -1501,22 +1514,65 @@ function renderListsTab(){
   }
   wrap.appendChild(distCard);
 
-  // ---- delete whole batch ----
+  // ---- imported lists (batches) — each shown, archivable, and deletable separately ----
   if(monthContacts.length>0){
-    var delBatchCard=el('<div class="card" style="margin-bottom:14px; border-color:var(--danger);"></div>');
-    delBatchCard.appendChild(el('<div class="section-title">Supprimer toute la liste</div>'));
-    delBatchCard.appendChild(el('<div class="faint" style="margin-bottom:10px;">Supprime définitivement tous les contacts importés pour '+TEAM_LABEL[listType]+' ce mois-ci ('+monthContacts.length+') — action irréversible.</div>'));
-    var delBatchBtn=el('<button class="btn danger block">Supprimer toute la liste ('+monthContacts.length+')</button>');
-    delBatchBtn.onclick=async function(){
-      if(!confirm('Supprimer définitivement tous les contacts de '+TEAM_LABEL[listType]+' pour ce mois-ci ? Cette action est irréversible.')) return;
-      var idsToRemove = monthContacts.map(function(c){ return c.id; });
-      STATE.calllists = STATE.calllists.filter(function(c){ return idsToRemove.indexOf(c.id)===-1; });
-      await saveCalllists();
-      showToast('Liste supprimée ✓');
-      render();
-    };
-    delBatchCard.appendChild(delBatchBtn);
-    wrap.appendChild(delBatchCard);
+    var batches={};
+    monthContacts.forEach(function(c){
+      var bid = c.batchId || 'legacy';
+      if(!batches[bid]) batches[bid] = { id:bid, label:c.batchLabel || 'Liste sans nom (importée avant cette fonctionnalité)', contacts:[] };
+      batches[bid].contacts.push(c);
+    });
+    var batchList = Object.keys(batches).map(function(k){ return batches[k]; });
+    var activeBatches = batchList.filter(function(b){ return !b.contacts.every(function(c){ return c.archived; }); });
+    var archivedBatches = batchList.filter(function(b){ return b.contacts.every(function(c){ return c.archived; }); });
+
+    function batchRow(b, isArchived){
+      var pendingCount = b.contacts.filter(function(c){ return c.status==='pending'; }).length;
+      var doneCount = b.contacts.length - pendingCount;
+      var row=el(
+        '<div class="agent-list-item"><div class="meta">'+
+        '<div class="aname">'+escapeHtml(b.label)+(isArchived?' <span class="faint">(archivée)</span>':'')+'</div>'+
+        '<div class="faint" style="font-size:11.5px;">'+b.contacts.length+' contacts — '+pendingCount+' en attente, '+doneCount+' traités</div>'+
+        '</div></div>'
+      );
+      var actions=el('<div class="row"></div>');
+      var archiveBtn=el('<button class="btn secondary" style="padding:7px 12px; font-size:12px;">'+(isArchived?'Désarchiver':'Archiver')+'</button>');
+      archiveBtn.onclick=async function(){
+        b.contacts.forEach(function(c){ c.archived = !isArchived; });
+        await saveCalllists();
+        showToast(isArchived?'Liste restaurée ✓':'Liste archivée ✓');
+        render();
+      };
+      var delBtn=el('<button class="btn danger" style="padding:7px 12px; font-size:12px;">Supprimer</button>');
+      delBtn.onclick=async function(){
+        if(!confirm('Supprimer définitivement « '+b.label+' » ('+b.contacts.length+' contacts) ? Cette action est irréversible et supprimera aussi ses données des rapports.')) return;
+        var idsToRemove = b.contacts.map(function(c){ return c.id; });
+        STATE.calllists = STATE.calllists.filter(function(c){ return idsToRemove.indexOf(c.id)===-1; });
+        await saveCalllists();
+        showToast('Liste supprimée ✓');
+        render();
+      };
+      actions.appendChild(archiveBtn); actions.appendChild(delBtn);
+      row.appendChild(actions);
+      return row;
+    }
+
+    if(activeBatches.length>0){
+      var batchesCard=el('<div class="card" style="margin-bottom:14px;"></div>');
+      batchesCard.appendChild(el(
+        '<div class="section-title">Listes actives — '+TEAM_LABEL[listType]+' ('+activeBatches.length+')</div>'+
+        '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">Terminé avec une liste ou besoin de mettre en pause ? Archivez-la au lieu de la supprimer — ses données restent visibles dans les rapports.</div>'
+      ));
+      activeBatches.forEach(function(b){ batchesCard.appendChild(batchRow(b, false)); });
+      wrap.appendChild(batchesCard);
+    }
+
+    if(archivedBatches.length>0){
+      var archivedCard=el('<div class="card" style="margin-bottom:14px; opacity:0.75;"></div>');
+      archivedCard.appendChild(el('<div class="section-title">Listes archivées — '+TEAM_LABEL[listType]+' ('+archivedBatches.length+')</div>'));
+      archivedBatches.forEach(function(b){ archivedCard.appendChild(batchRow(b, true)); });
+      wrap.appendChild(archivedCard);
+    }
   }
 
   // ---- retry-eligible card ----
@@ -1572,16 +1628,30 @@ function renderListsTab(){
     };
     browseCard.appendChild(searchInput);
 
+    var batchFilterSel=document.createElement('select');
+    batchFilterSel.style.marginBottom='10px';
+    batchFilterSel.appendChild(el('<option value="">— Toutes les listes —</option>'));
+    (typeof batchList!=='undefined' ? batchList : []).forEach(function(b){
+      var isArch = b.contacts.every(function(c){ return c.archived; });
+      var o=document.createElement('option'); o.value=b.id; o.textContent=b.label+(isArch?' (archivée)':'')+' ('+b.contacts.length+')';
+      if(STATE.browseBatchFilter===b.id) o.selected=true;
+      batchFilterSel.appendChild(o);
+    });
+    batchFilterSel.onchange=function(){ STATE.browseBatchFilter=batchFilterSel.value; STATE.browseTableLimit=100; render(); };
+    browseCard.appendChild(batchFilterSel);
+
     var q=(STATE.browseSearchQuery||'').trim().toLowerCase();
-    var filteredContacts = q ? monthContacts.filter(function(c){
-      return (c.name||'').toLowerCase().indexOf(q)!==-1 || (c.phone||'').toLowerCase().indexOf(q)!==-1;
-    }) : monthContacts;
+    var filteredContacts = monthContacts.filter(function(c){
+      var matchesQ = !q || (c.name||'').toLowerCase().indexOf(q)!==-1 || (c.phone||'').toLowerCase().indexOf(q)!==-1;
+      var matchesBatch = !STATE.browseBatchFilter || (c.batchId||'legacy')===STATE.browseBatchFilter;
+      return matchesQ && matchesBatch;
+    });
 
     var limit=STATE.browseTableLimit;
     var visibleContacts=filteredContacts.slice(0, limit);
 
     var btbl=document.createElement('table');
-    btbl.innerHTML='<thead><tr><th>Nom</th><th>Assigné à</th><th>Statut</th><th>Durée</th><th>Vérification</th><th></th></tr></thead>';
+    btbl.innerHTML='<thead><tr><th>Nom</th><th>Liste</th><th>Assigné à</th><th>Statut</th><th>Durée</th><th>Vérification</th><th></th></tr></thead>';
     var btbody=document.createElement('tbody');
     visibleContacts.forEach(function(c){
       var tr=document.createElement('tr');
@@ -1590,6 +1660,8 @@ function renderListsTab(){
       nameInput.value=c.name||''; nameInput.style.fontSize='12.5px'; nameInput.style.padding='6px 8px'; nameInput.style.minWidth='110px';
       nameInput.onchange=async function(){ c.name=nameInput.value.trim(); await saveCalllists(); showToast('Mis à jour'); };
       tdName.appendChild(nameInput);
+      var tdBatch=document.createElement('td');
+      tdBatch.innerHTML='<span class="faint" style="font-size:11px;">'+escapeHtml(c.batchLabel||'—')+(c.archived?' 📦':'')+'</span>';
       var tdAssign=document.createElement('td');
       var sel=document.createElement('select');
       sel.style.fontSize='12px'; sel.style.padding='6px 8px';
@@ -1624,7 +1696,7 @@ function renderListsTab(){
         render();
       };
       tdDel.appendChild(delRowBtn);
-      tr.appendChild(tdName); tr.appendChild(tdAssign); tr.appendChild(tdStatus); tr.appendChild(tdDur); tr.appendChild(tdVerify); tr.appendChild(tdDel);
+      tr.appendChild(tdName); tr.appendChild(tdBatch); tr.appendChild(tdAssign); tr.appendChild(tdStatus); tr.appendChild(tdDur); tr.appendChild(tdVerify); tr.appendChild(tdDel);
       btbody.appendChild(tr);
     });
     btbl.appendChild(btbody);
