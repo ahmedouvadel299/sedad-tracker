@@ -479,18 +479,24 @@ async function loadAll(){
   }catch(e){ STATE.settings = Object.assign({}, DEFAULT_SETTINGS); STATE.loadError=true; }
   try{
     var rawCalllists = await dbGet('calllists');
-    if(Array.isArray(rawCalllists)){
-      // one-time migration: legacy storage kept the whole list under numeric indices,
-      // which would create duplicates once we start patching by contact id — rewrite once.
-      var migrated={};
-      rawCalllists.forEach(function(c){ if(c && c.id) migrated[c.id]=c; });
-      STATE.calllists = Object.keys(migrated).map(function(k){ return migrated[k]; });
-      dbSet('calllists', migrated).catch(function(){});
-    } else {
-      STATE.calllists = rawCalllists ? Object.keys(rawCalllists).map(function(k){ return rawCalllists[k]; }) : [];
-    }
+    STATE.calllists = dedupeCalllistsRaw(rawCalllists);
   }catch(e){ STATE.calllists = []; STATE.loadError=true; }
   STATE.ready = true;
+}
+// Turns the raw Firebase value (array OR keyed object, and possibly a mix of legacy
+// numeric-indexed entries alongside newer id-keyed ones) into a clean deduplicated array —
+// purely by reading, never by writing back, so many people loading at once can never race
+// each other into overwriting one another's data (the bug that caused past data loss).
+function dedupeCalllistsRaw(raw){
+  if(!raw) return [];
+  var byId={};
+  Object.keys(raw).forEach(function(fbKey){
+    var item=raw[fbKey];
+    if(!item || !item.id) return;
+    var isCanonical = (fbKey===item.id);
+    if(isCanonical || !byId[item.id]) byId[item.id]=item;
+  });
+  return Object.keys(byId).map(function(k){ return byId[k]; });
 }
 // Upsert one or more contacts (their .id is the key) without touching any other contact's data.
 async function saveCalllistItems(items){
@@ -509,7 +515,9 @@ async function deleteCalllistItems(ids){
 async function refreshCalllists(){
   try{
     var raw = await dbGet('calllists');
-    STATE.calllists = raw ? Object.keys(raw).map(function(k){ return raw[k]; }) : [];
+    STATE.calllists = dedupeCalllistsRaw(raw);
+    calllistsById = {};
+    STATE.calllists.forEach(function(c){ calllistsById[c.id]=c; });
     return true;
   }catch(e){ showToast('Échec de l\'actualisation, vérifiez la connexion internet'); return false; }
 }
@@ -531,8 +539,9 @@ function safeLiveRender(){
 function applyCalllistsStreamEvent(type, path, data){
   if(path==='/' || path===''){
     if(type==='put'){
-      calllistsById = {};
-      if(data){ Object.keys(data).forEach(function(k){ calllistsById[k]=data[k]; }); }
+      var deduped={};
+      dedupeCalllistsRaw(data).forEach(function(item){ deduped[item.id]=item; });
+      calllistsById = deduped;
     } else if(data){
       Object.keys(data).forEach(function(k){
         if(data[k]===null){ delete calllistsById[k]; } else { calllistsById[k]=data[k]; }
