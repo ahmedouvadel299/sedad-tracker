@@ -309,6 +309,7 @@ var STATE = {
   browseSearchQuery:'',
   browseBatchFilter:'',
   pendingListLimit:100,   // performance: cap rendered rows in an agent's pending-contacts list
+  waitingListLimit:100,   // performance: cap rendered rows in an agent's waiting-list tab
   importPreview:null,  // {listType, rows:[{name,phone,accountNo}]}
   modal:null,           // {type:'action', contactId, actionType} | {type:'editUser', userId}
   callStarts:{},        // contactId -> Date.now() when the in-app call button was pressed (not persisted)
@@ -671,6 +672,13 @@ function teamTodayTotal(team){
 }
 function pendingContactsFor(userId){
   return STATE.calllists.filter(function(c){ return c.assignedTo===userId && c.status==='pending' && !c.archived; });
+}
+// "Liste d'attente" — an agent's own rejected calls, limited to the two recoverable reasons
+var WAITING_LIST_REASONS = ['Injoignable', 'En cours'];
+function waitingListFor(userId){
+  return STATE.calllists.filter(function(c){
+    return c.assignedTo===userId && c.status==='failed' && !c.archived && WAITING_LIST_REASONS.indexOf(c.reason)!==-1;
+  });
 }
 function doneContactsForToday(userId){
   return STATE.calllists.filter(function(c){ return c.assignedTo===userId && c.status!=='pending' && c.actionDate===todayStr(); });
@@ -1180,15 +1188,19 @@ function renderAgentView(user){
   wrap.appendChild(el('<div class="tag '+(user.team==='تفعيل'?'activation':'usage')+'" style="margin-bottom:14px;">'+TEAM_LABEL[user.team]+'</div>'));
 
   var pendingCount=pendingContactsFor(user.id).length;
+  var waitingCount=waitingListFor(user.id).length;
   var tabs=el('<div class="tabs"></div>');
   var t1=el('<div class="tab '+(STATE.agentTab==='today'?'active':'')+'">Aujourd\'hui</div>');
   t1.onclick=function(){ STATE.agentTab='today'; render(); };
   var t2=el('<div class="tab '+(STATE.agentTab==='list'?'active':'')+'">Ma liste'+(pendingCount?' ('+pendingCount+')':'')+'</div>');
   t2.onclick=function(){ STATE.agentTab='list'; render(); };
-  tabs.appendChild(t1); tabs.appendChild(t2);
+  var t3=el('<div class="tab '+(STATE.agentTab==='waiting'?'active':'')+'">Liste d\'attente'+(waitingCount?' ('+waitingCount+')':'')+'</div>');
+  t3.onclick=function(){ STATE.agentTab='waiting'; render(); };
+  tabs.appendChild(t1); tabs.appendChild(t2); tabs.appendChild(t3);
   wrap.appendChild(tabs);
 
   if(STATE.agentTab==='list'){ wrap.appendChild(renderAgentListTab(user)); return wrap; }
+  if(STATE.agentTab==='waiting'){ wrap.appendChild(renderAgentWaitingTab(user)); return wrap; }
 
   var target=dailyTargetFor(user);
   var todayCount=combinedToday(user.id);
@@ -1280,6 +1292,33 @@ function renderAgentListTab(user){
     doneToday.forEach(function(c){ doneCard.appendChild(contactRow(c, true)); });
     wrap.appendChild(doneCard);
   }
+
+  return wrap;
+}
+
+function renderAgentWaitingTab(user){
+  var wrap=el('<div></div>');
+  var waiting=waitingListFor(user.id);
+
+  var card=el('<div class="card"></div>');
+  card.appendChild(el(
+    '<div class="section-title">Liste d\'attente ('+waiting.length+')</div>'+
+    '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">Vos propres appels rejetés — uniquement « Injoignable » et « En cours ». Vous pouvez les rappeler directement ici.</div>'
+  ));
+  if(waiting.length===0){
+    card.appendChild(el('<div class="empty-state"><div class="icon">✅</div><div>Aucun contact en liste d\'attente actuellement</div></div>'));
+  } else {
+    var limit=STATE.waitingListLimit;
+    waiting.slice(0, limit).forEach(function(c){
+      card.appendChild(contactRow(c));
+    });
+    if(waiting.length>limit){
+      var moreBtn=el('<button class="btn secondary block" style="margin-top:10px;">Afficher plus ('+(waiting.length-limit)+' restants)</button>');
+      moreBtn.onclick=function(){ STATE.waitingListLimit+=100; render(); };
+      card.appendChild(moreBtn);
+    }
+  }
+  wrap.appendChild(card);
 
   return wrap;
 }
