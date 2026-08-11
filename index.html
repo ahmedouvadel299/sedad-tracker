@@ -310,6 +310,7 @@ var STATE = {
   browseBatchFilter:'',
   pendingListLimit:100,   // performance: cap rendered rows in an agent's pending-contacts list
   waitingListLimit:100,   // performance: cap rendered rows in an agent's waiting-list tab
+  calllistsLoading:false,
   importPreview:null,  // {listType, rows:[{name,phone,accountNo}]}
   modal:null,           // {type:'action', contactId, actionType} | {type:'editUser', userId}
   callStarts:{},        // contactId -> Date.now() when the in-app call button was pressed (not persisted)
@@ -533,11 +534,41 @@ async function loadAll(){
   try{
     STATE.settings = (await dbGet('settings')) || Object.assign({}, DEFAULT_SETTINGS);
   }catch(e){ STATE.settings = Object.assign({}, DEFAULT_SETTINGS); STATE.loadError=true; }
-  try{
-    var rawCalllists = await dbGet('calllists');
-    STATE.calllists = dedupeCalllistsRaw(rawCalllists);
-  }catch(e){ STATE.calllists = []; STATE.loadError=true; }
+  // Les contacts (calllists) ne sont chargés qu'après la connexion, et seulement le
+  // sous-ensemble nécessaire (voir loadCalllistsForCurrentUser) — pour ne jamais faire
+  // télécharger à un agent (souvent sur données mobiles) l'intégralité des milliers de
+  // contacts de toute l'équipe alors qu'il n'a besoin que des siens.
+  STATE.calllists = [];
   STATE.ready = true;
+}
+// Charge uniquement les contacts pertinents pour la personne connectée :
+// - un agent ne reçoit que SES contacts assignés (requête filtrée côté serveur)
+// - un responsable/assistante reçoit l'ensemble (nécessaire pour la vue globale et les rapports)
+async function loadCalllistsForCurrentUser(){
+  var user = getUser(STATE.currentUserId);
+  if(!user) return;
+  STATE.calllistsLoading = true;
+  try{ STATE.calllists = await fetchScopedCalllistsArray(); }
+  catch(e){ STATE.calllists = []; }
+  STATE.calllistsLoading = false;
+  render();
+}
+async function fetchScopedCalllistsArray(){
+  var user = getUser(STATE.currentUserId);
+  if(user && user.role==='agent'){
+    var raw = await dbQuery('calllists', 'assignedTo', user.id);
+    return dedupeCalllistsRaw(raw);
+  }
+  var rawAll = await dbGet('calllists');
+  return dedupeCalllistsRaw(rawAll);
+}
+async function dbQuery(key, orderByField, equalToValue){
+  var qp = await authQueryParam();
+  var queryPart = 'orderBy=%22'+orderByField+'%22&equalTo='+encodeURIComponent('"'+equalToValue+'"');
+  var url = FIREBASE_DB_URL + '/' + APP_KEY + '/' + key + '.json' + (qp ? qp+'&'+queryPart : '?'+queryPart);
+  var res = await fetch(url);
+  if(!res.ok) throw new Error('query failed: ' + res.status);
+  return await res.json();
 }
 // Turns the raw Firebase value (array OR keyed object, and possibly a mix of legacy
 // numeric-indexed entries alongside newer id-keyed ones) into a clean deduplicated array —
@@ -570,8 +601,7 @@ async function deleteCalllistItems(ids){
 }
 async function refreshCalllists(){
   try{
-    var raw = await dbGet('calllists');
-    STATE.calllists = dedupeCalllistsRaw(raw);
+    STATE.calllists = await fetchScopedCalllistsArray();
     return true;
   }catch(e){ showToast('Échec de l\'actualisation, vérifiez la connexion internet'); return false; }
 }
@@ -594,8 +624,7 @@ var POLL_INTERVAL_MS = 180000; // 3 minutes
 async function pollForUpdates(){
   if(document.visibilityState!=='visible' || !STATE.currentUserId) return;
   try{
-    var raw = await dbGet('calllists');
-    STATE.calllists = dedupeCalllistsRaw(raw);
+    STATE.calllists = await fetchScopedCalllistsArray();
   }catch(e){}
   try{ STATE.users = (await dbGet('users')) || STATE.users; }catch(e){}
   try{ STATE.entries = (await dbGet('entries')) || STATE.entries; }catch(e){}
@@ -885,6 +914,10 @@ function render(){
   }
   var user=getUser(STATE.currentUserId);
   if(!user){ STATE.currentUserId=null; render(); return; }
+  if(STATE.calllistsLoading){
+    app.appendChild(el('<div class="login-wrap"><div class="muted">Chargement de vos données…</div></div>'));
+    return;
+  }
 
   var wrap=document.createElement('div');
   wrap.appendChild(renderTopbar(user));
@@ -1105,7 +1138,9 @@ function renderSetup(){
     STATE.users.push(admin);
     await saveUsers();
     STATE.currentUserId=admin.id;
+    STATE.calllistsLoading=true;
     render();
+    loadCalllistsForCurrentUser();
   };
   form.appendChild(btn);
   card.appendChild(form);
@@ -1177,7 +1212,9 @@ function attemptLogin(){
   if(STATE.pinBuffer===u.pin){
     STATE.currentUserId=u.id;
     STATE.pinBuffer=''; STATE.loginStep='name'; STATE.loginSelectedUser=null;
+    STATE.calllistsLoading=true;
     render();
+    loadCalllistsForCurrentUser();
   } else {
     var box=document.getElementById('login-err');
     if(box) box.innerHTML='<div class="error-msg">Code incorrect, réessayez</div>';
