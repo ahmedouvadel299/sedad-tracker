@@ -480,8 +480,16 @@ async function ensureAuth(){
       if(authState.refreshToken){ await refreshAuthToken(); }
       else{ await anonymousSignIn(); }
     }catch(e){
-      // si le rafraîchissement échoue, retente une connexion anonyme neuve
-      await anonymousSignIn();
+      try{
+        // si le rafraîchissement échoue, retente une connexion anonyme neuve
+        await anonymousSignIn();
+      }catch(e2){
+        // l'authentification a échoué des deux façons — on continue sans jeton plutôt
+        // que de faire planter tous les chargements de données (dégradation en douceur)
+        authState.idToken=null; authState.refreshToken=null; authState.expiresAt=0;
+        authState.pending=null;
+        return null;
+      }
     }
     authState.pending=null;
     return authState.idToken;
@@ -549,16 +557,15 @@ async function loadCalllistsForCurrentUser(){
   if(!user) return;
   STATE.calllistsLoading = true;
   try{ STATE.calllists = await fetchScopedCalllistsArray(); }
-  catch(e){ STATE.calllists = []; }
+  catch(e){ showToast('Échec du chargement de vos données — vérifiez la connexion et réessayez (⟳)'); }
   STATE.calllistsLoading = false;
   render();
 }
 async function fetchScopedCalllistsArray(){
-  var user = getUser(STATE.currentUserId);
-  if(user && user.role==='agent'){
-    var raw = await dbQuery('calllists', 'assignedTo', user.id);
-    return dedupeCalllistsRaw(raw);
-  }
+  // NOTE : la version filtrée par requête (orderBy/equalTo) a échoué en conditions
+  // réelles pour tous les agents — on revient à la récupération complète, éprouvée
+  // et fiable, pour ne jamais bloquer le travail de l'équipe. À ré-optimiser plus
+  // tard avec des tests plus poussés avant remise en production.
   var rawAll = await dbGet('calllists');
   return dedupeCalllistsRaw(rawAll);
 }
