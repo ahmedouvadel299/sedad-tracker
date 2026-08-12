@@ -31,8 +31,8 @@
   html,body{height:100%;}
   body{
     background:
-      radial-gradient(ellipse 900px 500px at 15% -5%, rgba(224,178,58,0.10), transparent 60%),
-      radial-gradient(ellipse 700px 500px at 100% 20%, rgba(111,191,139,0.06), transparent 55%),
+      radial-gradient(ellipse 900px 500px at 15% -5%, rgba(224,178,58,0.16), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 20%, rgba(111,191,139,0.11), transparent 55%),
       var(--bg);
     color:var(--text);
     font-family:'IBM Plex Sans Arabic', sans-serif;
@@ -73,7 +73,7 @@
   /* ---------- generic ---------- */
   .card{
     background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-    padding:18px;
+    padding:18px; box-shadow:0 8px 24px -12px rgba(0,0,0,0.5); position:relative;
   }
   .muted{ color:var(--text-dim); }
   .faint{ color:var(--text-faint); }
@@ -82,12 +82,13 @@
   .btn{
     font-family:inherit; border:none; cursor:pointer; border-radius:10px;
     padding:12px 18px; font-size:14px; font-weight:600;
-    background:var(--accent); color:#1a1509;
+    background:var(--accent); color:#1a1509; transition:transform .15s, box-shadow .15s;
+    box-shadow:0 3px 10px rgba(224,178,58,0.18);
   }
-  .btn:active{ transform:translateY(1px); }
-  .btn.secondary{ background:var(--surface-3); color:var(--text); border:1px solid var(--border); }
-  .btn.ghost{ background:none; color:var(--text-dim); border:1px dashed var(--border); }
-  .btn.danger{ background:var(--danger-soft); color:#f0b3ae; border:1px solid var(--danger); }
+  .btn:active{ transform:translateY(1px); box-shadow:0 1px 4px rgba(224,178,58,0.15); }
+  .btn.secondary{ background:var(--surface-3); color:var(--text); border:1px solid var(--border); box-shadow:none; }
+  .btn.ghost{ background:none; color:var(--text-dim); border:1px dashed var(--border); box-shadow:none; }
+  .btn.danger{ background:var(--danger-soft); color:#f0b3ae; border:1px solid var(--danger); box-shadow:none; }
   .btn:disabled{ opacity:.4; cursor:not-allowed; }
   .btn.block{ width:100%; }
   input, select{
@@ -116,12 +117,13 @@
   th,td{ padding:10px 8px; text-align:right; border-bottom:1px solid var(--border); }
   th{ color:var(--text-dim); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.03em; }
   tbody tr:hover{ background:rgba(255,255,255,0.02); }
-  .tabs{ display:flex; gap:6px; margin-bottom:18px; overflow-x:auto; }
+  .tabs{ display:flex; gap:8px; margin-bottom:18px; overflow-x:auto; }
   .tab{
-    padding:9px 16px; border-radius:20px; font-size:13px; cursor:pointer;
+    padding:10px 18px; border-radius:22px; font-size:13px; cursor:pointer;
     background:var(--surface); border:1px solid var(--border); color:var(--text-dim); white-space:nowrap;
+    transition:background .2s, border-color .2s, color .2s, box-shadow .2s;
   }
-  .tab.active{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .tab.active{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); font-weight:600; box-shadow:0 0 16px rgba(224,178,58,0.15); }
   .section-title{ font-size:13px; color:var(--text-dim); margin-bottom:12px; letter-spacing:.02em; }
   .bar-track{ height:8px; border-radius:6px; background:var(--surface-2); overflow:hidden; }
   .bar-fill{ height:100%; border-radius:6px; transition:width .4s ease; }
@@ -156,7 +158,9 @@
 
   /* ---------- stat cards ---------- */
   .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
-  .stat-card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
+  .stat-card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; position:relative; overflow:hidden; }
+  .stat-card::before{ content:''; position:absolute; inset:0 0 auto 0; height:3px; background:var(--accent); }
+  .stat-card:nth-child(2n)::before{ background:var(--activation); }
   .stat-card .num{ font-family:'El Messiri', serif; font-size:26px; font-weight:700; }
   .stat-card .lbl{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
 
@@ -488,7 +492,7 @@ function workdaysElapsedInMonth(){
 var FIREBASE_DB_URL = "https://sedad-tracker-default-rtdb.europe-west1.firebasedatabase.app"; // exemple: https://sedad-tracker-12345-default-rtdb.firebaseio.com
 var APP_KEY = "sedad-app";          // à personnaliser, sans espaces
 var FIREBASE_API_KEY = "REPLACE-ME-API-KEY"; // Project settings > General > Web API Key
-var GEMINI_API_KEY = "AQ.Ab8RN6KP6j--Uk3RRDYK2dLgPhjNIjW2_mG6KousO5JAyStAdA"; // gratuit sur aistudio.google.com/app/apikey — assistant IA
+var GEMINI_API_KEY = "REPLACE-ME-GEMINI-KEY"; // gratuit sur aistudio.google.com/app/apikey — assistant IA
 function geminiConfigured(){ return GEMINI_API_KEY && GEMINI_API_KEY.indexOf('REPLACE-ME')===-1; }
 
 function firebaseConfigured(){
@@ -1384,7 +1388,7 @@ function renderSetup(){
 function renderLogin(){
   var wrap=el('<div class="login-wrap"><div class="stamp-card"></div></div>');
   var card=wrap.querySelector('.stamp-card');
-  card.appendChild(el(stampRingSvg(0,'#C9A227')));
+  card.appendChild(el(stampRingSvg(0,'#E0B23A')));
   card.appendChild(el('<div class="login-title">Connexion</div><div class="login-sub">Registre SEDAD — Gestion SEDAD</div>'));
 
   if(STATE.loginStep==='name'){
@@ -1468,11 +1472,11 @@ function stampRingSvg(pct, color, size, label, sublabel){
   var cx=size/2, cy=size/2;
   return '<div class="stamp-ring" style="width:'+size+'px;height:'+size+'px;">'+
     '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'">'+
-      '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#2A3D35" stroke-width="5"/>'+
+      '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#2C4136" stroke-width="5"/>'+
       '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+color+'" stroke-width="5" '+
         'stroke-linecap="round" stroke-dasharray="'+c+'" stroke-dashoffset="'+offset+'" '+
         'transform="rotate(-90 '+cx+' '+cy+')" style="transition:stroke-dashoffset .5s ease;"/>'+
-      (size>=140 ? '<circle cx="'+cx+'" cy="'+cy+'" r="'+(r-10)+'" fill="none" stroke="#2A3D35" stroke-width="1" stroke-dasharray="2 4"/>' : '')+
+      (size>=140 ? '<circle cx="'+cx+'" cy="'+cy+'" r="'+(r-10)+'" fill="none" stroke="#2C4136" stroke-width="1" stroke-dasharray="2 4"/>' : '')+
     '</svg>'+
     (label!==undefined ? '<div class="ring-center"><div class="val">'+label+'</div>'+(sublabel?'<div class="of">'+sublabel+'</div>':'')+'</div>' : '')+
   '</div>';
@@ -1764,17 +1768,17 @@ function renderOverviewTab(){
   var statGrid=el('<div class="stat-grid"></div>');
   var actToday=teamTodayTotal('تفعيل'), useToday=teamTodayTotal('استخدام');
   var actMonth=teamMonthTotal('تفعيل'), useMonth=teamMonthTotal('استخدام');
-  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actToday)+'</div><div class="lbl">Non valide — aujourd\'hui</div></div>'));
-  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useToday)+'</div><div class="lbl">Inactif — aujourd\'hui</div></div>'));
-  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamActivation)+'</span></div><div class="lbl">Non valide — ce mois-ci</div></div>'));
-  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamUsage)+'</span></div><div class="lbl">Inactif — ce mois-ci</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#6FBF8B;">'+fmtNum(actToday)+'</div><div class="lbl">Non valide — aujourd\'hui</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#E0B23A;">'+fmtNum(useToday)+'</div><div class="lbl">Inactif — aujourd\'hui</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#6FBF8B;">'+fmtNum(actMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamActivation)+'</span></div><div class="lbl">Non valide — ce mois-ci</div></div>'));
+  statGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#E0B23A;">'+fmtNum(useMonth)+' <span class="faint" style="font-size:12px;">/ '+fmtNum(STATE.settings.monthlyTargetTeamUsage)+'</span></div><div class="lbl">Inactif — ce mois-ci</div></div>'));
   wrap.appendChild(statGrid);
 
   var month = currentMonthKey();
   var actRate = teamSuccessRateMonth('تفعيل', month), useRate = teamSuccessRateMonth('استخدام', month);
   var rateGrid=el('<div class="stat-grid" style="margin-top:0;"></div>');
-  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#5AA57C;">'+(actRate!=null?actRate+'%':'—')+'</div><div class="lbl">Taux de réussite — Non valide</div></div>'));
-  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#C9A227;">'+(useRate!=null?useRate+'%':'—')+'</div><div class="lbl">Taux de réussite — Inactif</div></div>'));
+  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#6FBF8B;">'+(actRate!=null?actRate+'%':'—')+'</div><div class="lbl">Taux de réussite — Non valide</div></div>'));
+  rateGrid.appendChild(el('<div class="stat-card"><div class="num" style="color:#E0B23A;">'+(useRate!=null?useRate+'%':'—')+'</div><div class="lbl">Taux de réussite — Inactif</div></div>'));
   wrap.appendChild(rateGrid);
 
   var hourlyStats = hourlySuccessStats();
@@ -1784,7 +1788,7 @@ function renderOverviewTab(){
     hourlyStats.slice(0,3).forEach(function(h){
       var row=el('<div class="reason-bar-row"></div>');
       row.appendChild(el('<div class="rlabel">'+String(h.hour).padStart(2,'0')+':00</div>'));
-      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+h.rate+'%; background:#5AA57C;"></div></div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+h.rate+'%; background:#6FBF8B;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+h.rate+'%</div>'));
       hourCard.appendChild(row);
     });
@@ -1793,8 +1797,8 @@ function renderOverviewTab(){
   }
 
   [
-    {team:'تفعيل', agents:actAgents, color:'#5AA57C'},
-    {team:'استخدام', agents:useAgents, color:'#C9A227'}
+    {team:'تفعيل', agents:actAgents, color:'#6FBF8B'},
+    {team:'استخدام', agents:useAgents, color:'#E0B23A'}
   ].forEach(function(group){
     if(group.agents.length===0) return;
     var card=el('<div class="card" style="margin-top:14px;"></div>');
@@ -2200,7 +2204,7 @@ function renderListsTab(){
       var pillLabel = c.status==='pending'?RL.pendingStatus:(c.status==='success'?RL.success:RL.failed);
       tdStatus.innerHTML='<span class="status-pill '+pillClass+'">'+pillLabel+'</span>';
       var tdDur=document.createElement('td');
-      tdDur.innerHTML = c.callDurationSeconds!=null ? (fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠</span>':'')) : '—';
+      tdDur.innerHTML = c.callDurationSeconds!=null ? (fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#E08677;">⚠</span>':'')) : '—';
       var tdVerify=document.createElement('td');
       if(c.status==='pending'){ tdVerify.innerHTML='—'; }
       else {
@@ -2388,8 +2392,8 @@ function renderSummaryReport(){
   var summaryCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   summaryCard.appendChild(el(
     '<div class="stat-grid">'+
-      '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actTot)+'</div><div class="lbl">'+RL.totalNonValide+'</div></div>'+
-      '<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useTot)+'</div><div class="lbl">'+RL.totalInactif+'</div></div>'+
+      '<div class="stat-card"><div class="num" style="color:#6FBF8B;">'+fmtNum(actTot)+'</div><div class="lbl">'+RL.totalNonValide+'</div></div>'+
+      '<div class="stat-card"><div class="num" style="color:#E0B23A;">'+fmtNum(useTot)+'</div><div class="lbl">'+RL.totalInactif+'</div></div>'+
       '<div class="stat-card"><div class="num">'+fmtNum(actTot+useTot)+'</div><div class="lbl">'+RL.totalGeneral+'</div></div>'+
     '</div>'
   ));
@@ -2423,7 +2427,7 @@ function renderSummaryReport(){
       var pct=Math.round((e2.count/maxCount)*100);
       var row=el('<div class="reason-bar-row"></div>');
       row.appendChild(el('<div class="rlabel">'+escapeHtml(frReason(e2.reason))+'</div>'));
-      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#E08677;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
       reasonsCard.appendChild(row);
     });
@@ -2551,7 +2555,7 @@ function renderFailedCallsReport(){
   var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   statCard.appendChild(el(
     '<div class="stat-grid">'+
-    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failedContacts.length)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#E08677;">'+fmtNum(failedContacts.length)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
     '</div>'
   ));
   printArea.appendChild(statCard);
@@ -2564,7 +2568,7 @@ function renderFailedCallsReport(){
       var pct=Math.round((e2.count/maxR)*100);
       var row=el('<div class="reason-bar-row"></div>');
       row.appendChild(el('<div class="rlabel">'+escapeHtml(frReason(e2.reason))+'</div>'));
-      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#E08677;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
       reasonsCard.appendChild(row);
     });
@@ -2667,7 +2671,7 @@ function renderAcceptedCallsReport(){
   var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   statCard.appendChild(el(
     '<div class="stat-grid">'+
-    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(acceptedContacts.length)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#6FBF8B;">'+fmtNum(acceptedContacts.length)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
     '</div>'
   ));
   printArea.appendChild(statCard);
@@ -2680,7 +2684,7 @@ function renderAcceptedCallsReport(){
       var pct=Math.round((e2.count/maxR)*100);
       var row=el('<div class="reason-bar-row"></div>');
       row.appendChild(el('<div class="rlabel">'+escapeHtml(e2.reason||'')+'</div>'));
-      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#5AA57C;"></div></div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#6FBF8B;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
       reasonsCard.appendChild(row);
     });
@@ -2753,10 +2757,10 @@ function renderRangeReportBody(startDate, endDate, titleText, fileSlug){
   var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   statCard.appendChild(el(
     '<div class="stat-grid">'+
-    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(actTot)+'</div><div class="lbl">'+RL.totalNonValide+'</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:#C9A227;">'+fmtNum(useTot)+'</div><div class="lbl">'+RL.totalInactif+'</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(successCount)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failCount)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#6FBF8B;">'+fmtNum(actTot)+'</div><div class="lbl">'+RL.totalNonValide+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#E0B23A;">'+fmtNum(useTot)+'</div><div class="lbl">'+RL.totalInactif+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#6FBF8B;">'+fmtNum(successCount)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#E08677;">'+fmtNum(failCount)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
     '</div>'
   ));
   printArea.appendChild(statCard);
@@ -2798,7 +2802,7 @@ function renderRangeReportBody(startDate, endDate, titleText, fileSlug){
         '<td style="direction:ltr; text-align:right;">'+escapeHtml(c.phone||'—')+'</td>'+
         '<td>'+FR_TEAM_LABEL_SHORT[c.listType]+'</td><td>'+(c.actionDate||'')+'</td>'+
         '<td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
-        '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠ '+RL.manual+'</span>':'')+'</td>'+
+        '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#E08677;">⚠ '+RL.manual+'</span>':'')+'</td>'+
         '<td>'+frStatus(c.status)+'</td>'+
         '<td>'+(c.reason?escapeHtml(c.status==='failed'?frReason(c.reason):c.reason):'—')+'</td>';
       tbody.appendChild(tr);
@@ -2818,7 +2822,7 @@ function renderRangeReportBody(startDate, endDate, titleText, fileSlug){
       var pct=Math.round((e2.count/maxR)*100);
       var row=el('<div class="reason-bar-row"></div>');
       row.appendChild(el('<div class="rlabel">'+escapeHtml(frReason(e2.reason))+'</div>'));
-      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#E08677;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
       reasonsCard.appendChild(row);
     });
@@ -2958,8 +2962,8 @@ function renderIndividualReport(){
   var statCard=el('<div class="card" style="margin-bottom:14px;"></div>');
   statCard.appendChild(el(
     '<div class="stat-grid">'+
-    '<div class="stat-card"><div class="num" style="color:#5AA57C;">'+fmtNum(successCount)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:#B5514B;">'+fmtNum(failCount)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#6FBF8B;">'+fmtNum(successCount)+'</div><div class="lbl">'+RL.successCount+'</div></div>'+
+    '<div class="stat-card"><div class="num" style="color:#E08677;">'+fmtNum(failCount)+'</div><div class="lbl">'+RL.failedCount+'</div></div>'+
     '<div class="stat-card"><div class="num">'+fmtNum(manualTotal)+'</div><div class="lbl">'+RL.manualExtra+'</div></div>'+
     '<div class="stat-card"><div class="num">'+fmtDurationFr(callSecs)+'</div><div class="lbl">'+RL.callTime+'</div></div>'+
     '</div>'
@@ -2979,7 +2983,7 @@ function renderIndividualReport(){
       tr.innerHTML='<td>'+escapeHtml(c.name||'—')+'</td><td style="direction:ltr; text-align:right;">'+escapeHtml(c.phone||'—')+'</td>'+
         '<td>'+FR_TEAM_LABEL_SHORT[c.listType]+'</td><td>'+(c.actionDate||'')+'</td>'+
         '<td style="direction:ltr; text-align:right;">'+(c.actionAt?fmtTime(c.actionAt):'—')+'</td>'+
-        '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#B5514B;">⚠</span>':'')+'</td>'+
+        '<td>'+fmtDurationFr(c.callDurationSeconds)+(c.autoTimed===false?' <span style="color:#E08677;">⚠</span>':'')+'</td>'+
         '<td>'+frStatus(c.status)+'</td>'+
         '<td>'+(c.reason?escapeHtml(c.status==='failed'?frReason(c.reason):c.reason):'—')+'</td>';
       tbody.appendChild(tr);
@@ -3002,7 +3006,7 @@ function renderIndividualReport(){
       var pct=Math.round((e2.count/maxR)*100);
       var row=el('<div class="reason-bar-row"></div>');
       row.appendChild(el('<div class="rlabel">'+escapeHtml(frReason(e2.reason))+'</div>'));
-      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#B5514B;"></div></div>'));
+      row.appendChild(el('<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:#E08677;"></div></div>'));
       row.appendChild(el('<div class="rcount">'+fmtNum(e2.count)+'</div>'));
       reasonsCard.appendChild(row);
     });
