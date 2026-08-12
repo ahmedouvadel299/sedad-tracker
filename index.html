@@ -9,29 +9,30 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
-    --bg:#0F1B1A;
-    --surface:#16241F;
-    --surface-2:#1D2E27;
-    --surface-3:#233A31;
-    --border:#2A3D35;
-    --text:#E8DFC8;
-    --text-dim:#9FB0A8;
-    --text-faint:#6C8079;
-    --accent:#C9A227;
-    --accent-soft:#3A331A;
-    --activation:#5AA57C;
-    --activation-soft:#1B2D24;
-    --usage:#C9A227;
-    --usage-soft:#332C16;
-    --danger:#B5514B;
-    --danger-soft:#2E1C1A;
+    --bg:#0D1A17;
+    --surface:#16261F;
+    --surface-2:#1D2F26;
+    --surface-3:#25392E;
+    --border:#2C4136;
+    --text:#F2E9D8;
+    --text-dim:#A9BDB2;
+    --text-faint:#71877C;
+    --accent:#E0B23A;
+    --accent-soft:#3D3315;
+    --activation:#6FBF8B;
+    --activation-soft:#1B3025;
+    --usage:#E0B23A;
+    --usage-soft:#3D3315;
+    --danger:#E08677;
+    --danger-soft:#3A2320;
     --radius:14px;
   }
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{height:100%;}
   body{
     background:
-      radial-gradient(ellipse at top left, rgba(201,162,39,0.06), transparent 55%),
+      radial-gradient(ellipse 900px 500px at 15% -5%, rgba(224,178,58,0.10), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 20%, rgba(111,191,139,0.06), transparent 55%),
       var(--bg);
     color:var(--text);
     font-family:'IBM Plex Sans Arabic', sans-serif;
@@ -1441,7 +1442,37 @@ function renderAgentView(user){
   var target=dailyTargetFor(user);
   var todayCount=combinedToday(user.id);
   var pct = target>0 ? Math.round((todayCount/target)*100) : 0;
-  var ringColor = user.team==='تفعيل' ? '#5AA57C' : '#C9A227';
+  var ringColor = user.team==='تفعيل' ? '#6FBF8B' : '#E0B23A';
+
+  var greetHour = new Date().getHours();
+  var greetWord = greetHour<12 ? 'Bonjour' : (greetHour<18 ? 'Bon après-midi' : 'Bonsoir');
+  var firstName = user.name.split(' ')[0];
+  wrap.appendChild(el(
+    '<div class="faint" style="font-size:12.5px; margin-bottom:2px;">'+greetWord+', <b style="color:var(--text-dim);">'+escapeHtml(firstName)+'</b> 👋</div>'
+  ));
+
+  var motivMsg = null;
+  if(pct>=100){
+    motivMsg = { ic:'🏆', title:'Objectif du jour atteint !', sub:fmtNum(todayCount)+' opérations aujourd\'hui — excellent travail' };
+  } else if(pct>=70){
+    var remain70=target-todayCount;
+    motivMsg = { ic:'🎯', title:'Presque là — '+pct+'% de l\'objectif', sub:'Plus que '+fmtNum(remain70)+' pour atteindre '+fmtNum(target) };
+  } else {
+    var rating0 = agentWeekRating(user);
+    if(rating0.successRate!=null && rating0.successRate>=0.7){
+      motivMsg = { ic:'⚡', title:'Bon rythme cette semaine', sub:'Taux de réussite de '+Math.round(rating0.successRate*100)+'% — continuez ainsi' };
+    }
+  }
+  if(motivMsg){
+    wrap.appendChild(el(
+      '<div class="card" style="border-color:rgba(224,178,58,0.35); background:linear-gradient(120deg, var(--accent-soft), rgba(224,178,58,0.03)); margin:10px 0 14px; padding:13px 15px;">'+
+      '<div style="display:flex; align-items:center; gap:10px;">'+
+      '<div style="font-size:20px;">'+motivMsg.ic+'</div>'+
+      '<div><div style="font-size:13px; font-weight:600; color:var(--accent);">'+motivMsg.title+'</div>'+
+      '<div class="faint" style="font-size:11.5px; margin-top:1px;">'+motivMsg.sub+'</div></div>'+
+      '</div></div>'
+    ));
+  }
 
   var nowHour = new Date().getHours();
   if(nowHour>=15 && pct<70){
