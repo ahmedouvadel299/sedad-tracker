@@ -260,6 +260,19 @@
   .list-type-toggle .opt.active.usage{ background:var(--usage-soft); border-color:var(--usage); color:var(--usage); font-weight:600; }
   .preview-table-wrap{ max-height:260px; overflow:auto; border:1px solid var(--border); border-radius:10px; margin:12px 0; }
 
+  .ai-fab{
+    position:fixed; bottom:22px; left:18px; z-index:90; width:52px; height:52px; border-radius:50%;
+    background:linear-gradient(145deg, var(--accent), #9c7c17); border:none; font-size:22px; cursor:pointer;
+    box-shadow:0 6px 20px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center;
+  }
+  .ai-modal-sheet{ max-width:480px; display:flex; flex-direction:column; height:80vh; max-height:640px; }
+  .ai-log{ flex:1; overflow-y:auto; padding:4px 2px; font-size:13.5px; line-height:1.8; }
+  .ai-msg-user{ margin-top:10px; color:var(--accent); }
+  .ai-msg-bot{ margin-top:8px; color:var(--text); }
+  .ai-msg-error{ margin-top:8px; color:var(--danger); }
+  .ai-inputrow{ display:flex; gap:8px; margin-top:10px; }
+  .ai-inputrow input{ flex:1; }
+
   @media print{
     body{ background:#fff; }
     body *{ visibility:hidden; }
@@ -269,6 +282,7 @@
     .stat-card{ background:#f5f5f5; border:1px solid #ddd; }
     table, th, td{ border-color:#ccc !important; }
     .bar-fill{ background:#999 !important; }
+    .ai-fab{ display:none !important; }
   }
 </style>
 </head>
@@ -281,6 +295,7 @@
 
 /* ============================== STATE ============================== */
 var browseSearchDebounce=null;
+var waitingSearchDebounce=null;
 var STATE = {
   ready:false,
   users:[],
@@ -310,7 +325,9 @@ var STATE = {
   browseBatchFilter:'',
   pendingListLimit:100,   // performance: cap rendered rows in an agent's pending-contacts list
   waitingListLimit:100,   // performance: cap rendered rows in an agent's waiting-list tab
+  waitingSearchQuery:'',
   calllistsLoading:false,
+  aiChatLog:[],   // {role:'user'|'bot'|'error', text} — in-memory only, not saved
   importPreview:null,  // {listType, rows:[{name,phone,accountNo}]}
   modal:null,           // {type:'action', contactId, actionType} | {type:'editUser', userId}
   callStarts:{},        // contactId -> Date.now() when the in-app call button was pressed (not persisted)
@@ -441,6 +458,8 @@ function workdaysElapsedInMonth(){
 var FIREBASE_DB_URL = "https://sedad-tracker-default-rtdb.europe-west1.firebasedatabase.app"; // exemple: https://sedad-tracker-12345-default-rtdb.firebaseio.com
 var APP_KEY = "sedad-app";          // à personnaliser, sans espaces
 var FIREBASE_API_KEY = "REPLACE-ME-API-KEY"; // Project settings > General > Web API Key
+var GEMINI_API_KEY = "REPLACE-ME-GEMINI-KEY"; // gratuit sur aistudio.google.com/app/apikey — assistant IA
+function geminiConfigured(){ return GEMINI_API_KEY && GEMINI_API_KEY.indexOf('REPLACE-ME')===-1; }
 
 function firebaseConfigured(){
   return FIREBASE_DB_URL && FIREBASE_DB_URL.indexOf('REPLACE-ME')===-1 && FIREBASE_DB_URL.indexOf('https://')===0;
@@ -979,11 +998,20 @@ function render(){
   wrap.appendChild(main);
   app.appendChild(wrap);
 
+  if(geminiConfigured()){
+    var aiFab=el('<button class="ai-fab" title="Assistant">🤖</button>');
+    aiFab.onclick=function(){ STATE.modal={type:'ai'}; render(); };
+    app.appendChild(aiFab);
+  }
+
   if(STATE.modal && STATE.modal.type==='action'){
     app.appendChild(renderActionModal(STATE.modal.contactId, STATE.modal.actionType));
   }
   if(STATE.modal && STATE.modal.type==='editUser'){
     app.appendChild(renderEditUserModal(STATE.modal.userId));
+  }
+  if(STATE.modal && STATE.modal.type==='ai'){
+    app.appendChild(renderAiModal(user));
   }
 }
 
@@ -1134,6 +1162,100 @@ function renderEditUserModal(userId){
   overlay.appendChild(sheet);
   return overlay;
 }
+
+/* ============================== ASSISTANT IA ============================== */
+function buildAiContext(user){
+  var ctx = "Tu es l'assistant intégré à « Registre SEDAD », l'application de suivi d'une équipe de centre d'appel pour le BANQUE MAURITANIENNE POUR L'INVESTISSEMENT (application SEDAD). ";
+  ctx += "Réponds TOUJOURS en arabe uniquement, de façon brève, claire et professionnelle. ";
+  ctx += "Fonctionnement de l'app : les agents appellent des clients pour activer des comptes SEDAD (« Groupe contact client non valide ») ou encourager l'utilisation de comptes déjà activés (« Groupe contact client inactif »). ";
+  ctx += "Onglets d'un agent : « Aujourd'hui » (objectif du jour), « Ma liste » (contacts à traiter — bouton 📞 pour chronométrer l'appel puis ✓ succès ou ✕ échec avec motif), « Liste d'attente » (appels à rappeler, motifs Injoignable/En cours). ";
+  ctx += "Onglets d'un responsable : « Vue d'ensemble », « Listes » (import Excel, répartition, archivage), « Équipe », « Rapports » (résumé, journalier, hebdomadaire, période, individuel, appels acceptés/échoués — avec export Excel et impression PDF), « Paramètres ». ";
+  ctx += "Ne donne jamais d'information sur un autre utilisateur que celui qui te parle, sauf si c'est le responsable de centre contact qui demande des chiffres globaux d'équipe. ";
+  ctx += "\n\nContexte de la personne qui te parle maintenant :\n";
+  ctx += "- Nom : " + user.name + ", rôle : " + frRoleLabel(user) + "\n";
+  if(user.role==='agent'){
+    var target = dailyTargetFor(user);
+    var today = combinedToday(user.id);
+    var monthTotalVal = combinedMonthTotal(user.id);
+    ctx += "- Équipe : " + TEAM_LABEL[user.team] + "\n";
+    ctx += "- Aujourd'hui : " + today + " sur " + target + " (objectif quotidien)\n";
+    ctx += "- Total ce mois-ci : " + monthTotalVal + "\n";
+    ctx += "- Contacts en attente (Ma liste) : " + pendingContactsFor(user.id).length + "\n";
+    ctx += "- Liste d'attente (appels à rappeler) : " + waitingListFor(user.id).length + "\n";
+  } else {
+    var month = currentMonthKey();
+    ctx += "- Total équipe ce mois — Groupe non valide : " + teamMonthTotal('تفعيل', month) + " / objectif " + STATE.settings.monthlyTargetTeamActivation + "\n";
+    ctx += "- Total équipe ce mois — Groupe inactif : " + teamMonthTotal('استخدام', month) + " / objectif " + STATE.settings.monthlyTargetTeamUsage + "\n";
+    ctx += "- Nombre d'agents : " + agentsOnly().length + "\n";
+  }
+  return ctx;
+}
+async function sendAiMessage(user, question, logEl, inputEl, sendBtn){
+  if(!question.trim()) return;
+  STATE.aiChatLog.push({role:'user', text:question});
+  inputEl.value='';
+  sendBtn.disabled=true;
+  renderAiLog(logEl);
+  var thinking = el('<div class="ai-msg-bot faint">...جارٍ الكتابة</div>');
+  logEl.appendChild(thinking);
+  logEl.scrollTop = logEl.scrollHeight;
+  try{
+    var res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+GEMINI_API_KEY, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        systemInstruction: { parts:[{ text: buildAiContext(user) }] },
+        contents: [{ parts:[{ text: question }] }]
+      })
+    });
+    var data = await res.json();
+    var answer = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0].text) || null;
+    if(answer){ STATE.aiChatLog.push({role:'bot', text:answer}); }
+    else{ STATE.aiChatLog.push({role:'error', text:'تعذر الحصول على رد من المساعد. تحقق من صحة مفتاح Gemini.'}); }
+  }catch(e){
+    STATE.aiChatLog.push({role:'error', text:'تعذر الاتصال بالمساعد. تحقق من الاتصال بالإنترنت.'});
+  }
+  sendBtn.disabled=false;
+  renderAiLog(logEl);
+}
+function renderAiLog(logEl){
+  logEl.innerHTML='';
+  if(STATE.aiChatLog.length===0){
+    logEl.appendChild(el('<div class="faint">مرحباً 👋 اسألني أي شيء عن استخدام التطبيق أو عن أرقامك الحالية.</div>'));
+  }
+  STATE.aiChatLog.forEach(function(m){
+    var cls = m.role==='user' ? 'ai-msg-user' : (m.role==='error' ? 'ai-msg-error' : 'ai-msg-bot');
+    var label = m.role==='user' ? 'أنت' : (m.role==='error' ? '⚠' : 'المساعد');
+    logEl.appendChild(el('<div class="'+cls+'"><b>'+label+':</b> '+escapeHtml(m.text).replace(/\n/g,'<br>')+'</div>'));
+  });
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function renderAiModal(user){
+  var overlay=el('<div class="modal-overlay"></div>');
+  overlay.onclick=function(e){ if(e.target===overlay){ STATE.modal=null; render(); } };
+  var sheet=el('<div class="modal-sheet ai-modal-sheet"></div>');
+  sheet.appendChild(el('<div class="login-title" style="text-align:right; font-size:16px;">🤖 المساعد</div>'));
+  var logEl=el('<div class="ai-log"></div>');
+  sheet.appendChild(logEl);
+  renderAiLog(logEl);
+
+  var row=el('<div class="ai-inputrow"></div>');
+  var input=document.createElement('input');
+  input.type='text'; input.placeholder='اكتب سؤالك...';
+  var sendBtn=el('<button class="btn">إرسال</button>');
+  sendBtn.onclick=function(){ sendAiMessage(user, input.value, logEl, input, sendBtn); };
+  input.onkeydown=function(e){ if(e.key==='Enter'){ sendAiMessage(user, input.value, logEl, input, sendBtn); } };
+  row.appendChild(input); row.appendChild(sendBtn);
+  sheet.appendChild(row);
+
+  var closeBtn=el('<button class="btn ghost block" style="margin-top:10px;">إغلاق</button>');
+  closeBtn.onclick=function(){ STATE.modal=null; render(); };
+  sheet.appendChild(closeBtn);
+
+  overlay.appendChild(sheet);
+  return overlay;
+}
+
 function renderTopbar(user){
   var bar=el('<div class="topbar"></div>');
   bar.appendChild(el(
@@ -1418,15 +1540,35 @@ function renderAgentWaitingTab(user){
     '<div class="section-title">Liste d\'attente ('+waiting.length+')</div>'+
     '<div class="faint" style="font-size:11.5px; margin-bottom:8px;">Vos propres appels rejetés — uniquement « Injoignable » et « En cours ». Vous pouvez les rappeler directement ici.</div>'
   ));
+
+  if(waiting.length>0){
+    var searchInput=document.createElement('input');
+    searchInput.type='search'; searchInput.placeholder='Rechercher par nom ou téléphone...';
+    searchInput.value=STATE.waitingSearchQuery||''; searchInput.style.marginBottom='10px';
+    searchInput.oninput=function(){
+      var v=searchInput.value;
+      clearTimeout(waitingSearchDebounce);
+      waitingSearchDebounce=setTimeout(function(){ STATE.waitingSearchQuery=v; STATE.waitingListLimit=100; render(); }, 350);
+    };
+    card.appendChild(searchInput);
+  }
+
+  var q=(STATE.waitingSearchQuery||'').trim().toLowerCase();
+  var filtered = q ? waiting.filter(function(c){
+    return (c.name||'').toLowerCase().indexOf(q)!==-1 || (c.phone||'').toLowerCase().indexOf(q)!==-1;
+  }) : waiting;
+
   if(waiting.length===0){
     card.appendChild(el('<div class="empty-state"><div class="icon">✅</div><div>Aucun contact en liste d\'attente actuellement</div></div>'));
+  } else if(filtered.length===0){
+    card.appendChild(el('<div class="faint">Aucun résultat pour cette recherche</div>'));
   } else {
     var limit=STATE.waitingListLimit;
-    waiting.slice(0, limit).forEach(function(c){
+    filtered.slice(0, limit).forEach(function(c){
       card.appendChild(contactRow(c));
     });
-    if(waiting.length>limit){
-      var moreBtn=el('<button class="btn secondary block" style="margin-top:10px;">Afficher plus ('+(waiting.length-limit)+' restants)</button>');
+    if(filtered.length>limit){
+      var moreBtn=el('<button class="btn secondary block" style="margin-top:10px;">Afficher plus ('+(filtered.length-limit)+' restants)</button>');
       moreBtn.onclick=function(){ STATE.waitingListLimit+=100; render(); };
       card.appendChild(moreBtn);
     }
